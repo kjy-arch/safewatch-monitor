@@ -1,4 +1,4 @@
-import json
+import json, time
 from google import genai
 from app.core.config import settings
 from app.core.database import supabase
@@ -72,7 +72,17 @@ def _analyze(text: str, source_type: str, departments: list) -> dict:
 
     prompt = f"{SYSTEM_PROMPT}\n\n[부서 목록]\n{dept_list}\n\n출처: {source_label}\n텍스트: {text[:800]}"
 
-    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    # Gemini 호출 — 실패 시 최대 3회 재시도
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+            break
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))  # 5초, 10초 대기 후 재시도
+            else:
+                raise e
+
     raw = response.text.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]

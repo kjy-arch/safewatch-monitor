@@ -92,6 +92,11 @@ def _build_excel(articles: list) -> bytes:
                 cell.alignment = Alignment(horizontal="center", vertical="top")
             if col_idx == 4:
                 cell.alignment = Alignment(horizontal="center", vertical="top")
+            # ★ 링크 컬럼(11번째)에 하이퍼링크 적용
+            if col_idx == 11 and value:
+                cell.value     = "링크 바로가기"
+                cell.hyperlink = value
+                cell.font      = Font(size=9, color="0563C1", underline="single")
 
     ws.freeze_panes = "A3"
     ws.auto_filter.ref = f"A2:L{len(articles) + 2}"
