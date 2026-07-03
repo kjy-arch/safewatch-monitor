@@ -43,6 +43,7 @@ def _parse_dc_date(text: str) -> datetime | None:
 def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
     """디시인사이드 갤러리 검색글 수집 — 어제 이후 게시물만."""
     saved = 0
+    failed = 0
     cutoff = _get_cutoff()
 
     for keyword in keywords:
@@ -56,6 +57,8 @@ def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
                     follow_redirects=True,
                 )
                 if res.status_code != 200:
+                    print(f"[dcinside:{gallery_name}] '{keyword}' HTTP {res.status_code}")
+                    failed += 1
                     continue
 
                 soup = BeautifulSoup(res.text, "html.parser")
@@ -80,7 +83,8 @@ def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
                         url   = href if href.startswith("http") else f"https://www.dcinside.com{href}"
                         candidates.append((title, url, post_dt))
 
-                    except Exception:
+                    except Exception as e:
+                        print(f"[dcinside:{gallery_name}] 게시글 파싱 실패: {type(e).__name__}: {e}")
                         continue
 
                 if not candidates:
@@ -106,9 +110,13 @@ def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
 
                 saved += save_articles(rows)
 
-            except Exception:
+            except Exception as e:
+                print(f"[dcinside:{gallery_name}] '{keyword}' 수집 실패: {type(e).__name__}: {e}")
+                failed += 1
                 continue
 
+    if failed:
+        print(f"[dcinside] 키워드×갤러리 {len(keywords) * len(GALLERIES)}건 중 {failed}건 실패")
     return saved
 
 
@@ -119,6 +127,6 @@ def _get_post_content(url: str) -> str:
         div = soup.select_one(".write_div, .post-content, #viewContent")
         if div:
             return re.sub(r"\s+", " ", div.get_text()).strip()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[dcinside] 본문 조회 실패: {type(e).__name__}: {e}")
     return ""

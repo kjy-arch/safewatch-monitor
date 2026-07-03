@@ -36,24 +36,33 @@ def run_crawl_and_analyze():
     sources = supabase.table("crawl_sources").select("*").eq("is_active", True).execute().data
 
     total_saved = 0
+    failed_sources = []
     for src in sources:
         stype = src["source_type"]
         sid   = src["id"]
         kws   = src["keywords"]
 
-        if stype in ("naver_news", "naver_blog", "naver_cafe"):
-            n = crawl_naver(sid, stype, kws)
-        elif stype == "youtube":
-            n = crawl_youtube(sid, kws)
-        elif stype == "dcinside":
-            n = crawl_dcinside(sid, kws)
-        else:
+        try:
+            if stype in ("naver_news", "naver_blog", "naver_cafe"):
+                n = crawl_naver(sid, stype, kws)
+            elif stype == "youtube":
+                n = crawl_youtube(sid, kws)
+            elif stype == "dcinside":
+                n = crawl_dcinside(sid, kws)
+            else:
+                n = 0
+        except Exception as e:
+            print(f"[스케줄러] {src['name']} 크롤러 오류: {type(e).__name__}: {e}")
+            failed_sources.append(src["name"])
             n = 0
 
         print(f"  {src['name']}: {n}건 수집")
         total_saved += n
 
-    print(f"[스케줄러] 총 {total_saved}건 수집 완료")
+    summary = f"[스케줄러] 총 {total_saved}건 수집 완료"
+    if failed_sources:
+        summary += f" (소스 오류: {', '.join(failed_sources)})"
+    print(summary)
 
     if total_saved > 0:
         analyzed = analyze_unclassified(limit=total_saved + 10)

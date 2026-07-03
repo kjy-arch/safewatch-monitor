@@ -23,8 +23,8 @@ COLUMNS = [
     ("게시일",   14),
     ("거짓점수", 9),
     ("거짓척도", 8),
-    ("의도유형", 12),
-    ("내용유형", 12),
+    ("내용구분", 12),
+    ("과목",     10),
     ("판단이유", 30),
     ("소관부서", 14),
     ("원문",     50),
@@ -73,8 +73,8 @@ def _build_excel(articles: list) -> bytes:
             pub,
             a.get("false_score", ""),
             level,
-            a.get("intent_type", ""),
-            a.get("content_type", ""),
+            a.get("label_l2") or "",
+            a.get("subject") or "",
             a.get("false_reason", ""),
             dept,
             (a.get("content") or a.get("title") or "")[:200],
@@ -169,7 +169,7 @@ def _summary_html(articles: list, today_str: str) -> str:
 
     <div style="margin-top:16px;padding:12px;background:#E8F0FB;border-radius:4px;font-size:12px;color:#555">
       📎 첨부 엑셀 파일에 전체 수집 결과가 포함되어 있습니다.<br>
-      컬럼: 출처 / 게시일 / 거짓점수 / 척도 / 의도유형 / 내용유형 / 판단이유 / 소관부서 / 링크 / 대응상태
+      컬럼: 출처 / 게시일 / 거짓점수 / 척도 / 내용구분 / 과목 / 판단이유 / 소관부서 / 링크 / 대응상태
     </div>
   </div>
 
@@ -182,10 +182,10 @@ def _summary_html(articles: list, today_str: str) -> str:
 
 # ── 발송 메인 ─────────────────────────────────────────────
 def send_alerts():
-    """당일 수집된 전체 기사를 엑셀 첨부로 이메일 발송."""
+    """당일 수집 기사를 수신자별 min_score 기준으로 필터링해 엑셀 첨부 발송."""
     recipients = (
         supabase.table("alert_settings")
-        .select("email")
+        .select("email, min_score")
         .eq("is_active", True)
         .execute()
         .data
@@ -212,25 +212,41 @@ def send_alerts():
         print("[알림] 오늘 수집된 기사 없음 — 발송 건너뜀")
         return
 
-    today_str   = now_kst.strftime("%Y년 %m월 %d일")
-    filename    = f"safewatch_{now_kst.strftime('%Y%m%d')}.xlsx"
-    excel_bytes = _build_excel(articles)
-    html_body   = _summary_html(articles, today_str)
+    today_str = now_kst.strftime("%Y년 %m월 %d일")
+    filename  = f"safewatch_{now_kst.strftime('%Y%m%d')}.xlsx"
 
-    sent_count = 0
+    # min_score별로 필터·엑셀을 한 번만 생성 (같은 기준 수신자끼리 재사용)
+    # 미분류(false_score 없음) 기사는 min_score > 0 필터에서 제외됨
+    cache: dict[int, tuple] = {}
+    sent_ids: set = set()
     for r in recipients:
+        ms = r.get("min_score") or 0
+        if ms not in cache:
+            filtered = articles if ms <= 0 else [
+                a for a in articles if (a.get("false_score") or -1) >= ms
+            ]
+            cache[ms] = (
+                filtered,
+                _build_excel(filtered) if filtered else None,
+                _summary_html(filtered, today_str) if filtered else None,
+            )
+        filtered, excel_bytes, html_body = cache[ms]
+
+        if not filtered:
+            print(f"[알림] {r['email']}: 거짓점수 {ms} 이상 기사 없음 — 발송 생략")
+            continue
+
         try:
             if _send(r["email"], f"[SafeWatch] {today_str} 수집 결과",
                      html_body, excel_bytes, filename):
-                sent_count += 1
-                print(f"[알림] 발송 완료 → {r['email']} ({len(articles)}건)")
+                sent_ids.update(a["id"] for a in filtered)
+                print(f"[알림] 발송 완료 → {r['email']} ({len(filtered)}건, 기준점수 {ms})")
         except Exception as e:
-            print(f"[알림] 발송 실패 ({r['email']}): {e}")
+            print(f"[알림] 발송 실패 ({r['email']}): {type(e).__name__}: {e}")
 
-    # 발송 완료 표시 — 1건 이상 실제 발송된 경우에만
-    ids = [a["id"] for a in articles]
-    if ids and sent_count > 0:
-        supabase.table("crawled_articles").update({"alert_sent": True}).in_("id", ids).execute()
+    # 발송 완료 표시 — 실제 발송된 메일에 포함된 기사만
+    if sent_ids:
+        supabase.table("crawled_articles").update({"alert_sent": True}).in_("id", list(sent_ids)).execute()
 
 
 def _send(to: str, subject: str, html: str, attachment: bytes, filename: str) -> bool:

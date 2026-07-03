@@ -23,6 +23,7 @@ def _parse_iso(date_str: str) -> datetime:
 def crawl_youtube(source_id: str, keywords: list[str]) -> int:
     """유튜브 동영상(어제 이후) + 댓글 수집 후 DB 저장."""
     saved = 0
+    failed = 0
     key = settings.YOUTUBE_API_KEY
     cutoff = _get_cutoff()
     # YouTube API publishedAfter 파라미터 (RFC 3339)
@@ -46,6 +47,8 @@ def crawl_youtube(source_id: str, keywords: list[str]) -> int:
                 timeout=10,
             )
             if res.status_code != 200:
+                print(f"[youtube] '{keyword}' 검색 HTTP {res.status_code}")
+                failed += 1
                 continue
 
             rows = []
@@ -76,6 +79,7 @@ def crawl_youtube(source_id: str, keywords: list[str]) -> int:
                         timeout=10,
                     )
                     if c_res.status_code != 200:
+                        print(f"[youtube] 댓글 조회 HTTP {c_res.status_code} (video={video_id})")
                         continue
 
                     for c in c_res.json().get("items", []):
@@ -94,15 +98,19 @@ def crawl_youtube(source_id: str, keywords: list[str]) -> int:
                         rows.append(_row(source_id, f"[댓글] {video_title}",
                                          comment_text, comment_url,
                                          comment_author, comment_date))
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[youtube] 댓글 수집 실패 (video={video_id}): {type(e).__name__}: {e}")
 
             # URL 중복 제거 후 일괄 저장 (키워드당 조회 1회 + insert 1회)
             saved += save_articles(rows)
 
-        except Exception:
+        except Exception as e:
+            print(f"[youtube] '{keyword}' 수집 실패: {type(e).__name__}: {e}")
+            failed += 1
             continue
 
+    if failed:
+        print(f"[youtube] 키워드 {len(keywords)}개 중 {failed}개 실패")
     return saved
 
 

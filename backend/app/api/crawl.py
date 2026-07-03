@@ -29,7 +29,7 @@ def list_articles(
 ):
     query = supabase.table("crawled_articles").select(
         "id, title, content, url, source_type, false_score, false_level, "
-        "false_reason, intent_type, content_type, response_status, "
+        "false_reason, label_l2, subject, response_status, "
         "published_at, created_at, departments(name)"
     ).order("created_at", desc=True).limit(limit)
 
@@ -57,25 +57,25 @@ def update_status(article_id: str, body: dict):
 @router.get("/stats")
 def get_stats():
     articles = supabase.table("crawled_articles").select(
-        "false_level, source_type, intent_type, response_status"
+        "false_level, source_type, label_l2, response_status"
     ).execute().data
 
     total = len(articles)
     by_level   = {}
     by_source  = {}
-    by_intent  = {}
+    by_label   = {}
     by_status  = {}
 
     for a in articles:
         by_level[a["false_level"] or "미분류"]     = by_level.get(a["false_level"] or "미분류", 0) + 1
         by_source[a["source_type"] or "-"]         = by_source.get(a["source_type"] or "-", 0) + 1
-        by_intent[a["intent_type"] or "미분류"]    = by_intent.get(a["intent_type"] or "미분류", 0) + 1
+        by_label[a["label_l2"] or "미분류"]        = by_label.get(a["label_l2"] or "미분류", 0) + 1
         by_status[a["response_status"] or "미확인"] = by_status.get(a["response_status"] or "미확인", 0) + 1
 
     return {
         "total": total,
         "by_level":  by_level,
         "by_source": by_source,
-        "by_intent": by_intent,
+        "by_label":  by_label,
         "by_status": by_status,
     }

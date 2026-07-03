@@ -44,6 +44,7 @@ def crawl_naver(source_id: str, source_type: str, keywords: list[str]) -> int:
     api_type, article_source_type = TYPE_MAP[source_type]
     cutoff = _get_cutoff()
     saved = 0
+    failed = 0
 
     for keyword in keywords:
         try:
@@ -54,6 +55,8 @@ def crawl_naver(source_id: str, source_type: str, keywords: list[str]) -> int:
                 timeout=10,
             )
             if res.status_code != 200:
+                print(f"[naver:{source_type}] '{keyword}' HTTP {res.status_code}")
+                failed += 1
                 continue
 
             rows = []
@@ -86,7 +89,11 @@ def crawl_naver(source_id: str, source_type: str, keywords: list[str]) -> int:
             # URL 중복 제거 후 일괄 저장 (키워드당 조회 1회 + insert 1회)
             saved += save_articles(rows)
 
-        except Exception:
+        except Exception as e:
+            print(f"[naver:{source_type}] '{keyword}' 수집 실패: {type(e).__name__}: {e}")
+            failed += 1
             continue
 
+    if failed:
+        print(f"[naver:{source_type}] 키워드 {len(keywords)}개 중 {failed}개 실패")
     return saved
