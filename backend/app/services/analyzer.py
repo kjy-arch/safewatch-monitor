@@ -9,17 +9,22 @@ from app.services.classifier_prompt import (
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
+# 이번 프로세스에서 분류에 실패한 기사 ID — 같은 실행 안에서 같은 기사를
+# 반복 재시도해 배치를 점유하는 것을 방지. 재시작하면 초기화되어 자연 재시도.
+_failed_ids: set = set()
+_FAILED_IDS_MAX = 500
+
 
 def analyze_unclassified(limit: int = 20) -> int:
     """분석 안 된 수집 기사를 Gemini로 분류 (병무청 공식 분류체계)."""
-    articles = (
+    query = (
         supabase.table("crawled_articles")
         .select("id, title, content, source_type")
         .is_("false_score", "null")
-        .limit(limit)
-        .execute()
-        .data
     )
+    if _failed_ids:
+        query = query.not_.in_("id", list(_failed_ids)[:_FAILED_IDS_MAX])
+    articles = query.limit(limit).execute().data
     departments = supabase.table("departments").select("id, name, keywords").execute().data
 
     analyzed = 0
@@ -48,6 +53,8 @@ def analyze_unclassified(limit: int = 20) -> int:
             analyzed += 1
         except Exception as e:
             print(f"[analyzer] 기사 {article['id']} 분류 실패: {type(e).__name__}: {e}")
+            if len(_failed_ids) < _FAILED_IDS_MAX:
+                _failed_ids.add(article["id"])
             continue
 
     if analyzed < len(articles):

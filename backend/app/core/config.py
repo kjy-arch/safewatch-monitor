@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     APP_ENV: str = "development"
     APP_PORT: int = 8001
+    CORS_ORIGINS: str = "*"  # 쉼표 구분 목록. 운영 배포 시 대시보드 도메인으로 제한
 
     class Config:
         env_file = ".env"
