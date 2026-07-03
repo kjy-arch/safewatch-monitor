@@ -1,7 +1,7 @@
 import httpx
 from datetime import datetime, timezone, timedelta
 from app.core.config import settings
-from app.core.database import supabase
+from app.crawlers.storage import save_articles
 
 
 def _get_cutoff() -> datetime:
@@ -48,6 +48,7 @@ def crawl_youtube(source_id: str, keywords: list[str]) -> int:
             if res.status_code != 200:
                 continue
 
+            rows = []
             for item in res.json().get("items", []):
                 video_id = item["id"].get("videoId")
                 if not video_id:
@@ -60,9 +61,9 @@ def crawl_youtube(source_id: str, keywords: list[str]) -> int:
                 description  = snippet.get("description", "")
                 video_url    = f"https://www.youtube.com/watch?v={video_id}"
 
-                saved += _save(source_id, video_title,
-                                description or video_title,
-                                video_url, channel_name, pub_str)
+                rows.append(_row(source_id, video_title,
+                                 description or video_title,
+                                 video_url, channel_name, pub_str))
 
                 # 댓글 수집
                 try:
@@ -90,11 +91,14 @@ def crawl_youtube(source_id: str, keywords: list[str]) -> int:
                         if len(comment_text) < 10:
                             continue
 
-                        saved += _save(source_id, f"[댓글] {video_title}",
-                                       comment_text, comment_url,
-                                       comment_author, comment_date)
+                        rows.append(_row(source_id, f"[댓글] {video_title}",
+                                         comment_text, comment_url,
+                                         comment_author, comment_date))
                 except Exception:
                     pass
+
+            # URL 중복 제거 후 일괄 저장 (키워드당 조회 1회 + insert 1회)
+            saved += save_articles(rows)
 
         except Exception:
             continue
@@ -102,19 +106,13 @@ def crawl_youtube(source_id: str, keywords: list[str]) -> int:
     return saved
 
 
-def _save(source_id, title, content, url, author, published_at) -> int:
-    try:
-        if supabase.table("crawled_articles").select("id").eq("url", url).execute().data:
-            return 0
-        supabase.table("crawled_articles").insert({
-            "source_id":    source_id,
-            "source_type":  "유튜브",
-            "title":        title[:200],
-            "content":      content[:2000],
-            "url":          url,
-            "author":       author,
-            "published_at": published_at,
-        }).execute()
-        return 1
-    except Exception:
-        return 0
+def _row(source_id, title, content, url, author, published_at) -> dict:
+    return {
+        "source_id":    source_id,
+        "source_type":  "유튜브",
+        "title":        title[:200],
+        "content":      content[:2000],
+        "url":          url,
+        "author":       author,
+        "published_at": published_at,
+    }

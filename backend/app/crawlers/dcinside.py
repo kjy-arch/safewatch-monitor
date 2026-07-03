@@ -1,7 +1,7 @@
 import httpx, re
 from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
-from app.core.database import supabase
+from app.crawlers.storage import existing_urls, save_articles
 
 GALLERIES = [
     ("군대", "arm"),
@@ -61,6 +61,7 @@ def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
                 soup = BeautifulSoup(res.text, "html.parser")
                 posts = soup.select(".sch_result_list li") or soup.select(".gall_list tr.ub-content")
 
+                candidates = []
                 for post in posts[:15]:
                     try:
                         title_tag = post.select_one("a.tit, a.title, .gall_tit a")
@@ -74,27 +75,36 @@ def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
                         if post_dt and post_dt < cutoff:
                             break  # 최신순이므로 이후는 모두 오래된 글
 
-                        title   = title_tag.get_text(strip=True)
-                        href    = title_tag.get("href", "")
-                        url     = href if href.startswith("http") else f"https://www.dcinside.com{href}"
-                        content = _get_post_content(url) or title
-
-                        if supabase.table("crawled_articles").select("id").eq("url", url).execute().data:
-                            continue
-
-                        supabase.table("crawled_articles").insert({
-                            "source_id":    source_id,
-                            "source_type":  "커뮤니티",
-                            "title":        title,
-                            "content":      content[:2000],
-                            "url":          url,
-                            "author":       f"디시 {gallery_name}갤",
-                            "published_at": (post_dt or datetime.now(timezone.utc)).isoformat(),
-                        }).execute()
-                        saved += 1
+                        title = title_tag.get_text(strip=True)
+                        href  = title_tag.get("href", "")
+                        url   = href if href.startswith("http") else f"https://www.dcinside.com{href}"
+                        candidates.append((title, url, post_dt))
 
                     except Exception:
                         continue
+
+                if not candidates:
+                    continue
+
+                # 이미 저장된 글은 본문 fetch 전에 걸러냄 (일괄 조회 1회)
+                dup = existing_urls([url for _, url, _ in candidates])
+
+                rows = []
+                for title, url, post_dt in candidates:
+                    if url in dup:
+                        continue
+                    content = _get_post_content(url) or title
+                    rows.append({
+                        "source_id":    source_id,
+                        "source_type":  "커뮤니티",
+                        "title":        title,
+                        "content":      content[:2000],
+                        "url":          url,
+                        "author":       f"디시 {gallery_name}갤",
+                        "published_at": (post_dt or datetime.now(timezone.utc)).isoformat(),
+                    })
+
+                saved += save_articles(rows)
 
             except Exception:
                 continue

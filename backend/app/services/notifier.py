@@ -1,6 +1,6 @@
 import smtplib
 from io import BytesIO
-from datetime import date, datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -38,7 +38,7 @@ def _build_excel(articles: list) -> bytes:
     ws = wb.active
     ws.title = "수집결과"
 
-    today_str = date.today().strftime("%Y년 %m월 %d일")
+    today_str = datetime.now(timezone(timedelta(hours=9))).strftime("%Y년 %m월 %d일")
     ws.merge_cells("A1:L1")
     title_cell = ws["A1"]
     title_cell.value = f"SafeWatch Monitor 수집 결과 — {today_str}"
@@ -193,10 +193,11 @@ def send_alerts():
     if not recipients:
         return
 
-    # 오늘 수집분 전체
-    today_start = datetime.now(timezone.utc).replace(
+    # 오늘 수집분 전체 — 오늘 00:00 KST를 UTC로 변환
+    now_kst = datetime.now(timezone(timedelta(hours=9)))
+    today_start = now_kst.replace(
         hour=0, minute=0, second=0, microsecond=0
-    ) - timedelta(hours=9)  # KST 00:00 → UTC
+    ).astimezone(timezone.utc)
 
     articles = (
         supabase.table("crawled_articles")
@@ -211,29 +212,31 @@ def send_alerts():
         print("[알림] 오늘 수집된 기사 없음 — 발송 건너뜀")
         return
 
-    today_str   = date.today().strftime("%Y년 %m월 %d일")
-    filename    = f"safewatch_{date.today().strftime('%Y%m%d')}.xlsx"
+    today_str   = now_kst.strftime("%Y년 %m월 %d일")
+    filename    = f"safewatch_{now_kst.strftime('%Y%m%d')}.xlsx"
     excel_bytes = _build_excel(articles)
     html_body   = _summary_html(articles, today_str)
 
+    sent_count = 0
     for r in recipients:
         try:
-            _send(r["email"], f"[SafeWatch] {today_str} 수집 결과",
-                  html_body, excel_bytes, filename)
-            print(f"[알림] 발송 완료 → {r['email']} ({len(articles)}건)")
+            if _send(r["email"], f"[SafeWatch] {today_str} 수집 결과",
+                     html_body, excel_bytes, filename):
+                sent_count += 1
+                print(f"[알림] 발송 완료 → {r['email']} ({len(articles)}건)")
         except Exception as e:
             print(f"[알림] 발송 실패 ({r['email']}): {e}")
 
-    # 발송 완료 표시
+    # 발송 완료 표시 — 1건 이상 실제 발송된 경우에만
     ids = [a["id"] for a in articles]
-    if ids:
+    if ids and sent_count > 0:
         supabase.table("crawled_articles").update({"alert_sent": True}).in_("id", ids).execute()
 
 
-def _send(to: str, subject: str, html: str, attachment: bytes, filename: str):
+def _send(to: str, subject: str, html: str, attachment: bytes, filename: str) -> bool:
     if not settings.SMTP_HOST or not settings.SMTP_USER:
         print(f"[알림 미발송] SMTP 미설정 — {to} / {filename} ({len(attachment)//1024}KB)")
-        return
+        return False
 
     msg = MIMEMultipart()
     msg["Subject"] = subject
@@ -251,3 +254,4 @@ def _send(to: str, subject: str, html: str, attachment: bytes, filename: str):
         server.starttls()
         server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
         server.send_message(msg)
+    return True

@@ -2,7 +2,7 @@ import httpx, re
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from app.core.config import settings
-from app.core.database import supabase
+from app.crawlers.storage import save_articles
 
 NAVER_HEADERS = {
     "X-Naver-Client-Id": settings.NAVER_CLIENT_ID,
@@ -56,6 +56,7 @@ def crawl_naver(source_id: str, source_type: str, keywords: list[str]) -> int:
             if res.status_code != 200:
                 continue
 
+            rows = []
             for item in res.json().get("items", []):
                 pub_at = _parse_date(item.get("pubDate", ""))
 
@@ -72,11 +73,7 @@ def crawl_naver(source_id: str, source_type: str, keywords: list[str]) -> int:
                 if not content:
                     continue
 
-                # URL 중복 방지 (2차 안전망)
-                if supabase.table("crawled_articles").select("id").eq("url", url).execute().data:
-                    continue
-
-                supabase.table("crawled_articles").insert({
+                rows.append({
                     "source_id":    source_id,
                     "source_type":  article_source_type,
                     "title":        title,
@@ -84,8 +81,10 @@ def crawl_naver(source_id: str, source_type: str, keywords: list[str]) -> int:
                     "url":          url,
                     "author":       author,
                     "published_at": pub_at.isoformat(),
-                }).execute()
-                saved += 1
+                })
+
+            # URL 중복 제거 후 일괄 저장 (키워드당 조회 1회 + insert 1회)
+            saved += save_articles(rows)
 
         except Exception:
             continue

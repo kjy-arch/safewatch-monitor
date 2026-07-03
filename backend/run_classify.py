@@ -10,14 +10,15 @@ total_analyzed = 0
 fail_streak = 0  # 연속 실패 횟수
 
 while True:
-    undone = len(supabase.table('crawled_articles').select('id').is_('false_score', 'null').execute().data)
-    total  = len(supabase.table('crawled_articles').select('id').execute().data)
+    undone = supabase.table('crawled_articles').select('id', count='exact').is_('false_score', 'null').limit(1).execute().count or 0
+    total  = supabase.table('crawled_articles').select('id', count='exact').limit(1).execute().count or 0
     done   = total - undone
+    percent = done / total * 100 if total else 0.0
     elapsed = int(time.time() - start)
     mins = elapsed // 60
     secs = elapsed % 60
 
-    print(f"  [{mins}분 {secs}초 경과] {done}/{total}건 ({done/total*100:.1f}%) — 남은 {undone}건")
+    print(f"  [{mins}분 {secs}초 경과] {done}/{total}건 ({percent:.1f}%) — 남은 {undone}건")
 
     if undone == 0:
         print("모든 기사 분류 완료!")
