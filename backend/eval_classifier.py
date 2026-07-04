@@ -120,7 +120,9 @@ def main():
             "reason":       pred["false_reason"],
         })
         mark = "O" if s["gold_l2"] == pred["label_l2"] else ("△" if gold_l1 == pred["label_l1"] else "X")
-        print(f"  [{i}/{len(picked)}] {mark} 정답={s['gold_l2']} 예측={pred['label_l2']} | {s['title'][:35]}")
+        # flush=True: 파이프/리다이렉트로 실행해도 로그에 실시간 기록되도록
+        print(f"  [{i}/{len(picked)}] {mark} 정답={s['gold_l2']} 예측={pred['label_l2']} | {s['title'][:35]}",
+              flush=True)
         time.sleep(0.6)  # API 부하 방지
 
     if not results:
