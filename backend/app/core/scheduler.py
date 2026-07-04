@@ -6,6 +6,7 @@ from app.core.database import supabase
 from app.crawlers.naver import crawl_naver
 from app.crawlers.youtube import crawl_youtube
 from app.crawlers.dcinside import crawl_dcinside
+from app.crawlers.fmkorea import crawl_fmkorea
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import send_alerts
 
@@ -43,12 +44,14 @@ def run_crawl_and_analyze():
         kws   = src["keywords"]
 
         try:
-            if stype in ("naver_news", "naver_blog", "naver_cafe"):
+            if stype in ("naver_news", "naver_blog", "naver_cafe", "naver_kin"):
                 n = crawl_naver(sid, stype, kws)
             elif stype == "youtube":
                 n = crawl_youtube(sid, kws)
             elif stype == "dcinside":
                 n = crawl_dcinside(sid, kws)
+            elif stype == "fmkorea":
+                n = crawl_fmkorea(sid, kws)
             else:
                 n = 0
         except Exception as e:

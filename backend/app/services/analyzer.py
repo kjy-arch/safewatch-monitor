@@ -96,7 +96,8 @@ def _find_dept(name, departments):
 
 def _analyze(title: str, text: str, source_type: str, departments: list) -> dict:
     source_label = {"언론": "언론 기사", "SNS": "SNS 게시물",
-                    "커뮤니티": "커뮤니티 게시물", "유튜브": "유튜브 댓글"}.get(source_type, "텍스트")
+                    "커뮤니티": "커뮤니티 게시물", "유튜브": "유튜브 댓글",
+                    "지식인": "지식인 질문글"}.get(source_type, "텍스트")
     dept_list = "\n".join(f"- {d['name']}" for d in departments)
 
     system = f"{SYSTEM_PROMPT}\n\n[부서 목록]\n{dept_list}"

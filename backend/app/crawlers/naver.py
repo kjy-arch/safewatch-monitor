@@ -13,6 +13,8 @@ TYPE_MAP = {
     "naver_news":  ("news",         "언론"),
     "naver_blog":  ("blog",         "SNS"),
     "naver_cafe":  ("cafearticle",  "커뮤니티"),
+    # kin API는 pubDate를 주지 않음 → published_at은 수집 시각으로 저장됨
+    "naver_kin":   ("kin",          "지식인"),
 }
 
 
