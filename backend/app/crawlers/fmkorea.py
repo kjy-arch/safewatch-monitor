@@ -1,7 +1,11 @@
+import time
 import httpx
 from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 from app.crawlers.storage import save_articles
+
+# 에펨은 연속 요청 시 HTTP 430(자체 속도제한)을 반환 — 키워드 간 대기 필수
+REQUEST_DELAY_SEC = 6
 
 BASE = "https://www.fmkorea.com"
 
@@ -69,7 +73,9 @@ def crawl_fmkorea(source_id: str, keywords: list[str]) -> int:
     failed = 0
     cutoff = _get_cutoff()
 
-    for keyword in keywords:
+    for i, keyword in enumerate(keywords):
+        if i:
+            time.sleep(REQUEST_DELAY_SEC)
         try:
             res = httpx.get(
                 f"{BASE}/search.php",

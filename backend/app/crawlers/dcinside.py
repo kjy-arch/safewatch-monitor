@@ -1,16 +1,22 @@
-import httpx, re
+import re, time
+import httpx
 from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 from app.crawlers.storage import existing_urls, save_articles
 
+BASE = "https://gall.dcinside.com"
+
+# 학습자료(21~24년) URL 분석 기반 — 조장정보 실발생 상위 갤러리
+# (이름, 갤러리 id, URL prefix: 정식='' / 마이너='mgallery/' / 미니='mini/')
 GALLERIES = [
-    ("군대", "arm"),
-    ("국방부", "ministry_of_national_defense"),
+    ("공익", "gongik_new", ""),          # 3,546건 — 압도적 1위
+    ("면제", "myunjae",    "mgallery/"),  # 222건
+    ("군대", "army",       ""),           # 162건
 ]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Referer": "https://www.dcinside.com",
+    "Referer": "https://gall.dcinside.com",
 }
 
 
@@ -22,36 +28,62 @@ def _get_cutoff() -> datetime:
     return yesterday_kst.astimezone(timezone.utc)
 
 
-def _parse_dc_date(text: str) -> datetime | None:
-    """디시 날짜 형식 파싱: '26.06.04 13:22' 또는 '13:22' (오늘)."""
-    now_kst = datetime.now(timezone(timedelta(hours=9)))
-    try:
-        if re.match(r"^\d{2}\.\d{2}\.\d{2}", text):
-            dt = datetime.strptime(text.strip(), "%y.%m.%d %H:%M")
-            dt = dt.replace(tzinfo=timezone(timedelta(hours=9)))
-        elif re.match(r"^\d{2}:\d{2}", text):
-            # 오늘 날짜
-            t = datetime.strptime(text.strip(), "%H:%M")
-            dt = now_kst.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
-        else:
-            return None
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
+def parse_gallery_rows(html: str, cutoff: datetime) -> list[tuple]:
+    """갤러리 검색 결과 HTML → (제목, url, 게시일) 목록.
+
+    공지·설문 행(gall_num이 숫자가 아님)은 제외, 게시일은 td.gall_date의
+    title 속성("2026-07-04 11:03:10", KST)에서 파싱. 컷오프 이전 글 제외.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for tr in soup.select(".gall_list tr.ub-content")[:20]:
+        try:
+            num = tr.select_one("td.gall_num")
+            if not num or not num.get_text(strip=True).isdigit():
+                continue  # 공지/설문
+
+            title_tag = tr.select_one(".gall_tit a")
+            if not title_tag:
+                continue
+
+            date_tag = tr.select_one("td.gall_date")
+            post_dt = None
+            if date_tag and date_tag.get("title"):
+                try:
+                    post_dt = datetime.strptime(
+                        date_tag["title"].strip(), "%Y-%m-%d %H:%M:%S"
+                    ).replace(tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
+                except ValueError:
+                    pass
+
+            # 검색 결과가 최신순이지만 확신할 수 없어 break 대신 건별 skip
+            if post_dt and post_dt < cutoff:
+                continue
+
+            title = title_tag.get_text(strip=True)
+            href = title_tag.get("href", "")
+            url = href if href.startswith("http") else f"{BASE}{href}"
+            out.append((title, url, post_dt))
+
+        except Exception as e:
+            print(f"[dcinside] 게시글 파싱 실패: {type(e).__name__}: {e}")
+            continue
+    return out
 
 
 def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
-    """디시인사이드 갤러리 검색글 수집 — 어제 이후 게시물만."""
+    """디시 갤러리 내부 검색(제목+내용) 수집 — 어제 이후 게시물만."""
     saved = 0
     failed = 0
     cutoff = _get_cutoff()
 
     for keyword in keywords:
-        for gallery_name, gallery_id in GALLERIES:
+        for gallery_name, gallery_id, prefix in GALLERIES:
             try:
                 res = httpx.get(
-                    "https://search.dcinside.com/post/p/1/sort/latest",
-                    params={"q": keyword, "gid": gallery_id},
+                    f"{BASE}/{prefix}board/lists/",
+                    params={"id": gallery_id, "s_type": "search_subject_memo",
+                            "s_keyword": keyword},
                     headers=HEADERS,
                     timeout=10,
                     follow_redirects=True,
@@ -61,32 +93,7 @@ def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
                     failed += 1
                     continue
 
-                soup = BeautifulSoup(res.text, "html.parser")
-                posts = soup.select(".sch_result_list li") or soup.select(".gall_list tr.ub-content")
-
-                candidates = []
-                for post in posts[:15]:
-                    try:
-                        title_tag = post.select_one("a.tit, a.title, .gall_tit a")
-                        if not title_tag:
-                            continue
-
-                        # ★ 게시일 추출 및 필터
-                        date_tag = post.select_one(".date, .gall_date, td.gall_date")
-                        post_dt  = _parse_dc_date(date_tag.get_text(strip=True)) if date_tag else None
-
-                        if post_dt and post_dt < cutoff:
-                            break  # 최신순이므로 이후는 모두 오래된 글
-
-                        title = title_tag.get_text(strip=True)
-                        href  = title_tag.get("href", "")
-                        url   = href if href.startswith("http") else f"https://www.dcinside.com{href}"
-                        candidates.append((title, url, post_dt))
-
-                    except Exception as e:
-                        print(f"[dcinside:{gallery_name}] 게시글 파싱 실패: {type(e).__name__}: {e}")
-                        continue
-
+                candidates = parse_gallery_rows(res.text, cutoff)
                 if not candidates:
                     continue
 
@@ -109,6 +116,7 @@ def crawl_dcinside(source_id: str, keywords: list[str]) -> int:
                     })
 
                 saved += save_articles(rows)
+                time.sleep(0.5)  # 갤러리 검색 간 소폭 대기 (요청 속도 완화)
 
             except Exception as e:
                 print(f"[dcinside:{gallery_name}] '{keyword}' 수집 실패: {type(e).__name__}: {e}")

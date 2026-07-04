@@ -26,9 +26,9 @@ def _is_workday() -> bool:
     return True
 
 
-def run_crawl_and_analyze():
-    """크롤링 → AI 분류 → 알림 (근무일에만 실행)."""
-    if not _is_workday():
+def run_crawl_and_analyze(force: bool = False):
+    """크롤링 → AI 분류 → 알림. 스케줄 실행은 근무일에만, 수동 실행(force)은 항상."""
+    if not force and not _is_workday():
         holiday_name = KR_HOLIDAYS.get(date.today(), "주말")
         print(f"[스케줄러] 오늘은 {holiday_name} — 크롤링 건너뜀")
         return

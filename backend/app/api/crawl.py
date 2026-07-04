@@ -8,8 +8,8 @@ router = APIRouter(tags=["crawl"])
 
 @router.post("/crawl/run")
 def manual_crawl(background_tasks: BackgroundTasks):
-    """수동으로 전체 크롤링 + 분류 실행."""
-    background_tasks.add_task(run_crawl_and_analyze)
+    """수동으로 전체 크롤링 + 분류 실행 (주말·공휴일에도 강제 실행)."""
+    background_tasks.add_task(run_crawl_and_analyze, True)
     return {"message": "크롤링 시작됨. 잠시 후 결과를 확인하세요."}
 
 
