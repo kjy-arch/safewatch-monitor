@@ -8,3 +8,4 @@ dist/
 *.log
 eval_result_*.csv
 keyword_baseline.json
+backend/app/data/keyword_scores.json

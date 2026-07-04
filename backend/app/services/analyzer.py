@@ -6,6 +6,7 @@ from app.core.database import supabase
 from app.services.classifier_prompt import (
     SYSTEM_PROMPT, LABEL_SCORE_RANGES, PROMOTION_LABELS, ALL_LABELS, SUBJECTS,
 )
+from app.services.keyword_scorer import score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
@@ -27,9 +28,29 @@ def analyze_unclassified(limit: int = 20) -> int:
     articles = query.limit(limit).execute().data
     departments = supabase.table("departments").select("id, name, keywords").execute().data
 
+    # 키워드 점수 사전 필터: 고점수 우선 분류, 임계치 미만은 Gemini 없이 단순정보 처리
+    if prefilter_enabled():
+        articles.sort(key=lambda a: score_text(f"{a.get('title') or ''} {a['content']}"),
+                      reverse=True)
+
     analyzed = 0
+    prefiltered = 0
     for article in articles:
         try:
+            text = f"{article.get('title') or ''} {article['content']}"
+            kw_score = score_text(text) if prefilter_enabled() else -1
+            if 0 <= kw_score < PREFILTER_THRESHOLD:
+                supabase.table("crawled_articles").update({
+                    "false_score":  5,
+                    "false_level":  "낮음",
+                    "false_reason": f"키워드 사전필터 자동분류 (점수 {kw_score})",
+                    "label_l2":     "단순내용",
+                    "subject":      "기타",
+                }).eq("id", article["id"]).execute()
+                prefiltered += 1
+                analyzed += 1
+                continue
+
             result = _analyze(article.get("title") or "", article["content"],
                               article["source_type"], departments)
             dept_id = _find_dept(result.get("department_name"), departments)
@@ -57,6 +78,8 @@ def analyze_unclassified(limit: int = 20) -> int:
                 _failed_ids.add(article["id"])
             continue
 
+    if prefiltered:
+        print(f"[analyzer] 사전필터로 {prefiltered}건 자동분류 (Gemini 호출 생략)")
     if analyzed < len(articles):
         print(f"[analyzer] {len(articles)}건 중 {len(articles) - analyzed}건 실패")
     return analyzed

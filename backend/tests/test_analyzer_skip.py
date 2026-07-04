@@ -12,6 +12,11 @@ for k in ("SUPABASE_URL", "SUPABASE_SECRET_KEY", "GEMINI_API_KEY",
 
 from types import SimpleNamespace
 import app.services.analyzer as analyzer
+import app.services.keyword_scorer as scorer
+
+# 이 테스트는 Gemini 경로의 실패 스킵만 검증 — 사전필터는 비활성화
+scorer._scores = None
+scorer._load_attempted = True
 
 failures = []
 
