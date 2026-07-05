@@ -35,7 +35,10 @@ def analyze_unclassified(limit: int = 20) -> int:
 
     analyzed = 0
     prefiltered = 0
-    for article in articles:
+    for idx, article in enumerate(articles, 1):
+        if idx % 20 == 0:
+            print(f"[analyzer] 진행 {idx}/{len(articles)}건 (완료 {analyzed}, 사전필터 {prefiltered})",
+                  flush=True)
         try:
             text = f"{article.get('title') or ''} {article['content']}"
             kw_score = score_text(text) if prefilter_enabled() else -1
