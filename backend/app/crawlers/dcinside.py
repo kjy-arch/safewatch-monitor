@@ -1,6 +1,7 @@
 import re, time
 import httpx
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 from app.crawlers.storage import existing_urls, save_articles
 
@@ -26,6 +27,22 @@ def _get_cutoff() -> datetime:
         hour=0, minute=0, second=0, microsecond=0
     )
     return yesterday_kst.astimezone(timezone.utc)
+
+
+def _canonical_url(href: str) -> str:
+    """검색 컨텍스트 파라미터(s_keyword 등)를 제거한 표준 URL.
+
+    검색 결과의 href에 검색어가 붙어 있어 같은 글이 키워드마다 다른 URL로
+    저장되던 중복을 방지한다 (id·no만 유지).
+    """
+    url = href if href.startswith("http") else f"{BASE}{href}"
+    p = urlparse(url)
+    q = parse_qs(p.query)
+    gid = q.get("id", [""])[0]
+    no = q.get("no", [""])[0]
+    if gid and no:
+        return f"{BASE}{p.path}?id={gid}&no={no}"
+    return url
 
 
 def parse_gallery_rows(html: str, cutoff: datetime) -> list[tuple]:
@@ -61,8 +78,7 @@ def parse_gallery_rows(html: str, cutoff: datetime) -> list[tuple]:
                 continue
 
             title = title_tag.get_text(strip=True)
-            href = title_tag.get("href", "")
-            url = href if href.startswith("http") else f"{BASE}{href}"
+            url = _canonical_url(title_tag.get("href", ""))
             out.append((title, url, post_dt))
 
         except Exception as e:

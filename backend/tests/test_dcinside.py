@@ -44,18 +44,26 @@ HTML = """
     <td class="gall_tit"><a href="/board/view/?id=gongik_new&no=200">날짜 title 없는 글</a></td>
     <td class="gall_date">07.04</td>
   </tr>
+  <tr class="ub-content">
+    <td class="gall_num">5672</td>
+    <td class="gall_tit"><a href="/mgallery/board/view/?id=myunjae&no=5672&s_type=search_subject_memo&s_keyword=병역&page=1">검색 파라미터 붙은 글</a></td>
+    <td class="gall_date" title="2026-07-04 12:00:00">12:00</td>
+  </tr>
 </tbody></table>
 """
 
 cutoff = datetime(2026, 7, 3, tzinfo=timezone.utc)
 rows = parse_gallery_rows(HTML, cutoff)
 
-check("공지·옛글 제외하고 2건", len(rows) == 2, f"got {len(rows)}: {[r[0] for r in rows]}")
+check("공지·옛글 제외하고 3건", len(rows) == 3, f"got {len(rows)}: {[r[0] for r in rows]}")
 check("제목 추출", rows[0][0] == "경계선지능 공익 흔하냐")
 check("상대경로 → 절대 URL", rows[0][1] == "https://gall.dcinside.com/board/view/?id=gongik_new&no=3217959")
 check("title 속성 KST→UTC", rows[0][2].isoformat() == "2026-07-04T02:03:10+00:00",
       f"got {rows[0][2]}")
 check("날짜 없는 글은 post_dt=None으로 포함", rows[1][0] == "날짜 title 없는 글" and rows[1][2] is None)
+check("검색 파라미터 제거 (URL 정규화)",
+      rows[2][1] == "https://gall.dcinside.com/mgallery/board/view/?id=myunjae&no=5672",
+      f"got {rows[2][1]}")
 
 print()
 if failures:
