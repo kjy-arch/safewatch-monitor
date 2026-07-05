@@ -76,6 +76,10 @@ def analyze_unclassified(limit: int = 20) -> int:
 
             analyzed += 1
         except Exception as e:
+            if "RESOURCE_EXHAUSTED" in str(e):
+                print("[analyzer] Gemini 크레딧/쿼터 소진 — 배치 중단. "
+                      "충전 후 재실행하면 미분류분부터 이어서 처리됩니다.")
+                break
             print(f"[analyzer] 기사 {article['id']} 분류 실패: {type(e).__name__}: {e}")
             if len(_failed_ids) < _FAILED_IDS_MAX:
                 _failed_ids.add(article["id"])

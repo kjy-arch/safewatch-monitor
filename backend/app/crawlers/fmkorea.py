@@ -4,8 +4,10 @@ from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 from app.crawlers.storage import save_articles
 
-# 에펨은 연속 요청 시 HTTP 430(자체 속도제한)을 반환 — 키워드 간 대기 필수
-REQUEST_DELAY_SEC = 6
+# 에펨은 연속 요청 시 HTTP 430(자체 속도제한)을 반환 — 키워드 간 대기 필수.
+# 430이 연속되면 IP 단위 일시 차단 상태이므로 이번 실행은 포기하고 다음 실행에 재시도.
+REQUEST_DELAY_SEC = 10
+RATE_LIMIT_ABORT = 2  # 연속 430 이 횟수면 남은 키워드 중단
 
 BASE = "https://www.fmkorea.com"
 
@@ -71,6 +73,7 @@ def crawl_fmkorea(source_id: str, keywords: list[str]) -> int:
     """에펨코리아 통합검색 수집 — 어제 이후 게시물만."""
     saved = 0
     failed = 0
+    rate_limited = 0
     cutoff = _get_cutoff()
 
     for i, keyword in enumerate(keywords):
@@ -85,10 +88,20 @@ def crawl_fmkorea(source_id: str, keywords: list[str]) -> int:
                 timeout=15,
                 follow_redirects=True,
             )
+            if res.status_code == 430:
+                rate_limited += 1
+                failed += 1
+                print(f"[fmkorea] '{keyword}' HTTP 430 (속도제한 {rate_limited}회)")
+                if rate_limited >= RATE_LIMIT_ABORT:
+                    print("[fmkorea] 연속 속도제한 — IP 일시 차단 상태로 판단, "
+                          "이번 실행 중단 (다음 실행에서 재시도)")
+                    break
+                continue
             if res.status_code != 200:
                 print(f"[fmkorea] '{keyword}' HTTP {res.status_code}")
                 failed += 1
                 continue
+            rate_limited = 0
 
             rows = [{
                 "source_id":   source_id,
