@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     APP_ENV: str = "development"
     APP_PORT: int = 8001
+    # 평일 08:00 자동 수집 스케줄 사용 여부. 테스트 단계에는 false(수동 실행만),
+    # 운영 전환 시 .env에서 AUTO_CRAWL=true 로 켠다.
+    AUTO_CRAWL: bool = False
     CORS_ORIGINS: str = "*"  # 쉼표 구분 목록. 운영 배포 시 대시보드 도메인으로 제한
 
     class Config:

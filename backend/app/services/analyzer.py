@@ -16,8 +16,11 @@ _failed_ids: set = set()
 _FAILED_IDS_MAX = 500
 
 
-def analyze_unclassified(limit: int = 20) -> int:
-    """분석 안 된 수집 기사를 Gemini로 분류 (병무청 공식 분류체계)."""
+def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
+    """분석 안 된 수집 기사를 Gemini로 분류 (병무청 공식 분류체계).
+
+    progress_cb(done, total)가 주어지면 매 건 처리 시작 시 호출해 진행률을 보고한다.
+    """
     query = (
         supabase.table("crawled_articles")
         .select("id, title, content, source_type")
@@ -36,6 +39,8 @@ def analyze_unclassified(limit: int = 20) -> int:
     analyzed = 0
     prefiltered = 0
     for idx, article in enumerate(articles, 1):
+        if progress_cb:
+            progress_cb(idx, len(articles))
         if idx % 20 == 0:
             print(f"[analyzer] 진행 {idx}/{len(articles)}건 (완료 {analyzed}, 사전필터 {prefiltered})",
                   flush=True)
