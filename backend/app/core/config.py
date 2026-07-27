@@ -7,6 +7,12 @@ class Settings(BaseSettings):
     NAVER_CLIENT_ID: str
     NAVER_CLIENT_SECRET: str
     YOUTUBE_API_KEY: str
+    # SNS 크롤러 자격증명 — 미설정 시 해당 크롤러는 no-op (기본값 "" 이라 로드 실패 없음)
+    INSTAGRAM_ACCESS_TOKEN: str = ""
+    INSTAGRAM_BUSINESS_ACCOUNT_ID: str = ""
+    X_BEARER_TOKEN: str = ""
+    TIKTOK_CLIENT_KEY: str = ""
+    TIKTOK_CLIENT_SECRET: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USER: str = ""

@@ -7,6 +7,9 @@ from app.crawlers.naver import crawl_naver
 from app.crawlers.youtube import crawl_youtube
 from app.crawlers.dcinside import crawl_dcinside
 from app.crawlers.fmkorea import crawl_fmkorea
+from app.crawlers.instagram import crawl_instagram
+from app.crawlers.x import crawl_x
+from app.crawlers.tiktok import crawl_tiktok
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import send_alerts
 
@@ -52,6 +55,12 @@ def run_crawl_and_analyze(force: bool = False):
                 n = crawl_dcinside(sid, kws)
             elif stype == "fmkorea":
                 n = crawl_fmkorea(sid, kws)
+            elif stype == "instagram":
+                n = crawl_instagram(sid, kws)
+            elif stype == "x":
+                n = crawl_x(sid, kws)
+            elif stype == "tiktok":
+                n = crawl_tiktok(sid, kws)
             else:
                 n = 0
         except Exception as e:
