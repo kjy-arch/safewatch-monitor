@@ -7,12 +7,21 @@ class Settings(BaseSettings):
     NAVER_CLIENT_ID: str
     NAVER_CLIENT_SECRET: str
     YOUTUBE_API_KEY: str
+    # SNS 크롤러 자격증명 — 미설정 시 해당 크롤러는 no-op (기본값 "" 이라 로드 실패 없음)
+    INSTAGRAM_ACCESS_TOKEN: str = ""
+    INSTAGRAM_BUSINESS_ACCOUNT_ID: str = ""
+    X_BEARER_TOKEN: str = ""
+    TIKTOK_CLIENT_KEY: str = ""
+    TIKTOK_CLIENT_SECRET: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     APP_ENV: str = "development"
     APP_PORT: int = 8001
+    # 평일 08:00 자동 수집 스케줄 사용 여부. 테스트 단계에는 false(수동 실행만),
+    # 운영 전환 시 .env에서 AUTO_CRAWL=true 로 켠다.
+    AUTO_CRAWL: bool = False
     CORS_ORIGINS: str = "*"  # 쉼표 구분 목록. 운영 배포 시 대시보드 도메인으로 제한
 
     class Config:

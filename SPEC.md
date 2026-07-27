@@ -40,6 +40,16 @@
 | 네이버 카페 | 네이버 검색 API | 동일 |
 | 유튜브 댓글 | YouTube Data API v3 | YOUTUBE_API_KEY |
 | 디시인사이드 | BeautifulSoup 스크래핑 | 불필요 |
+| 네이버 지식인 | 네이버 검색 API | 동일 |
+| 에펨코리아 | BeautifulSoup 스크래핑 | 불필요 |
+| 인스타그램 | Graph API 해시태그 검색 (recent_media) | INSTAGRAM_ACCESS_TOKEN / _BUSINESS_ACCOUNT_ID |
+| X | X API v2 recent search | X_BEARER_TOKEN |
+| 틱톡 | TikTok Research API (video/query) | TIKTOK_CLIENT_KEY / _CLIENT_SECRET |
+
+> 근거: 「병무청 불법·허위·조작정보 처리절차 및 사례」('26.7.22)의 법정 대규모 정보통신
+> 서비스제공자 9개(네이버·카카오·다음·네이트·디시인사이드·구글·메타·X·틱톡).
+> 인스타·X·틱톡은 공식 API가 인증·유료·심사 게이트라 자격증명 확보 전까지 크롤러는
+> no-op(로그 후 0건 반환)하며, crawl_sources는 `is_active=false`로 시드됨(005 마이그레이션).
 
 ---
 
@@ -50,7 +60,7 @@
 |------|------|------|
 | id | uuid PK | |
 | name | text | 소스명 (예: 네이버뉴스) |
-| source_type | text | naver_news / naver_blog / naver_cafe / youtube / dcinside |
+| source_type | text | naver_news / naver_blog / naver_cafe / naver_kin / youtube / dcinside / fmkorea / instagram / x / tiktok |
 | keywords | text[] | 검색 키워드 목록 |
 | is_active | bool | 활성화 여부 |
 | interval_minutes | int | 수집 주기 (분) |
@@ -125,7 +135,11 @@ safewatch-monitor/
 │       ├── crawlers/      # 채널별 크롤러
 │       │   ├── naver.py
 │       │   ├── youtube.py
-│       │   └── dcinside.py
+│       │   ├── dcinside.py
+│       │   ├── fmkorea.py
+│       │   ├── instagram.py
+│       │   ├── x.py
+│       │   └── tiktok.py
 │       ├── models/        # Pydantic 모델
 │       └── services/      # AI 분류, 알림
 │           ├── analyzer.py
@@ -152,6 +166,7 @@ safewatch-monitor/
 | 8 | APScheduler 자동 스케줄링 | ✅ 완료 (평일 08:00, 공휴일 제외) |
 | 9 | 이메일 알림 | ✅ 완료 (min_score 필터, 엑셀 첨부) |
 | 10 | React 대시보드 UI | ⬜ 대기 |
+| 11 | SNS 채널 확장 (인스타·X·틱톡) | ✅ 코드 완료 — 자격증명 확보 후 활성화 (005 마이그레이션) |
 
 ### 미구현 API (SPEC 5장 대비)
 `/api/articles/{id}` 상세, `/api/sources` CRUD, `/api/alerts` CRUD — 대시보드(10단계) 착수 시 함께 구현 예정.

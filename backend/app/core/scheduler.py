@@ -7,8 +7,13 @@ from app.crawlers.naver import crawl_naver
 from app.crawlers.youtube import crawl_youtube
 from app.crawlers.dcinside import crawl_dcinside
 from app.crawlers.fmkorea import crawl_fmkorea
+from app.crawlers.instagram import crawl_instagram
+from app.crawlers.x import crawl_x
+from app.crawlers.tiktok import crawl_tiktok
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import send_alerts
+from app.core import progress
+from app.core.config import settings
 
 scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 
@@ -33,12 +38,17 @@ def run_crawl_and_analyze(force: bool = False):
         print(f"[스케줄러] 오늘은 {holiday_name} — 크롤링 건너뜀")
         return
 
+    if progress.is_running():
+        print("[스케줄러] 이미 실행 중 — 중복 실행 건너뜀")
+        return
+
     print(f"[스케줄러] 크롤링 시작")
     sources = supabase.table("crawl_sources").select("*").eq("is_active", True).execute().data
+    progress.start(len(sources))
 
     total_saved = 0
     failed_sources = []
-    for src in sources:
+    for i, src in enumerate(sources, 1):
         stype = src["source_type"]
         sid   = src["id"]
         kws   = src["keywords"]
@@ -52,6 +62,12 @@ def run_crawl_and_analyze(force: bool = False):
                 n = crawl_dcinside(sid, kws)
             elif stype == "fmkorea":
                 n = crawl_fmkorea(sid, kws)
+            elif stype == "instagram":
+                n = crawl_instagram(sid, kws)
+            elif stype == "x":
+                n = crawl_x(sid, kws)
+            elif stype == "tiktok":
+                n = crawl_tiktok(sid, kws)
             else:
                 n = 0
         except Exception as e:
@@ -61,31 +77,45 @@ def run_crawl_and_analyze(force: bool = False):
 
         print(f"  {src['name']}: {n}건 수집")
         total_saved += n
+        progress.crawl_step(done=i, collected=total_saved)
 
     summary = f"[스케줄러] 총 {total_saved}건 수집 완료"
     if failed_sources:
         summary += f" (소스 오류: {', '.join(failed_sources)})"
     print(summary)
 
-    if total_saved > 0:
-        analyzed = analyze_unclassified(limit=total_saved + 10)
-        print(f"[스케줄러] AI 분류: {analyzed}건 완료")
-        if analyzed > 0:
-            send_alerts()
-            print("[스케줄러] 알림 발송 완료")
+    try:
+        if total_saved > 0:
+            progress.start_classify()
+            analyzed = analyze_unclassified(limit=total_saved + 10,
+                                            progress_cb=progress.classify_step)
+            print(f"[스케줄러] AI 분류: {analyzed}건 완료")
+            if analyzed > 0:
+                progress.start_notify()
+                send_alerts()
+                print("[스케줄러] 알림 발송 완료")
+        progress.finish(summary)
+    except Exception as e:
+        progress.fail(f"{type(e).__name__}: {e}")
+        raise
 
 
 def start_scheduler():
-    if not scheduler.running:
-        # 평일(월~금) 오전 08:00에 실행 — 공휴일은 실행 시 내부에서 건너뜀
-        scheduler.add_job(
-            run_crawl_and_analyze,
-            CronTrigger(day_of_week="mon-fri", hour=8, minute=0),
-            id="main_crawl",
-            replace_existing=True,
-        )
-        scheduler.start()
-        print("스케줄러 시작 완료 (평일 08:00, 공휴일 자동 제외)")
+    if scheduler.running:
+        return
+    # 테스트 단계에는 자동 수집을 끈다(AUTO_CRAWL=false). 수동 실행(/api/crawl/run)은 항상 동작.
+    if not settings.AUTO_CRAWL:
+        print("자동 수집 비활성 (AUTO_CRAWL=false) — 수동 실행만 동작")
+        return
+    # 평일(월~금) 오전 08:00에 실행 — 공휴일은 실행 시 내부에서 건너뜀
+    scheduler.add_job(
+        run_crawl_and_analyze,
+        CronTrigger(day_of_week="mon-fri", hour=8, minute=0),
+        id="main_crawl",
+        replace_existing=True,
+    )
+    scheduler.start()
+    print("스케줄러 시작 완료 (평일 08:00, 공휴일 자동 제외)")
 
 
 def stop_scheduler():
