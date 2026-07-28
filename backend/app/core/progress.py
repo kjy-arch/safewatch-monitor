@@ -15,6 +15,8 @@ _state: dict = {
     "phase_total": 0,
     "collected":   0,        # 이번 실행 수집 건수
     "analyzed":    0,        # 이번 실행 분류 건수
+    "high":        0,        # 이번 실행 위험 높음 건수
+    "mid":         0,        # 이번 실행 위험 중간 건수
     "started_at":  None,
     "finished_at": None,
     "message":     "",
@@ -35,7 +37,7 @@ def start(total_sources: int) -> None:
         _state.update(
             status="running", phase="크롤링",
             phase_done=0, phase_total=total_sources,
-            collected=0, analyzed=0,
+            collected=0, analyzed=0, high=0, mid=0,
             started_at=_now(), finished_at=None, message="",
         )
 
@@ -53,6 +55,15 @@ def start_classify() -> None:
 def classify_step(done: int, total: int) -> None:
     with _lock:
         _state.update(phase="분류", phase_done=done, phase_total=total, analyzed=done)
+
+
+def count_risk(level: str) -> None:
+    """분류 결과의 위험도를 이번 실행 카운터에 반영 (높음/중간만)."""
+    with _lock:
+        if level == "높음":
+            _state["high"] += 1
+        elif level == "중간":
+            _state["mid"] += 1
 
 
 def start_notify() -> None:

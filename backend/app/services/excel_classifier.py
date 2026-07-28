@@ -11,7 +11,8 @@ import openpyxl
 from app.core.database import supabase
 from app.services.analyzer import _analyze
 from app.services.keyword_scorer import (
-    score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD,
+    score_text, is_enabled as prefilter_enabled,
+    PREFILTER_THRESHOLD, NEWS_PREFILTER_THRESHOLD,
 )
 
 # 헤더 후보 — 본문/원문 열을 우선 탐지 (제목은 보조)
@@ -109,8 +110,10 @@ def run(rows: list[dict], limit: int = 200) -> None:
         text = r["text"]
         title = r.get("title") or ""
         try:
+            threshold = (NEWS_PREFILTER_THRESHOLD if (r.get("source") or "") == "언론"
+                         else PREFILTER_THRESHOLD)
             kw_score = score_text(f"{title} {text}") if prefilter_enabled() else -1
-            if 0 <= kw_score < PREFILTER_THRESHOLD:
+            if 0 <= kw_score < threshold:
                 res = {"label_l2": "단순내용", "subject": "기타", "false_score": 5,
                        "false_level": "낮음", "false_reason": f"키워드 사전필터 (점수 {kw_score})",
                        "department_name": None}

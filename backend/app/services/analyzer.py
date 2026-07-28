@@ -3,10 +3,14 @@ from google import genai
 from google.genai import types
 from app.core.config import settings
 from app.core.database import supabase
+from app.core import progress
 from app.services.classifier_prompt import (
     SYSTEM_PROMPT, LABEL_SCORE_RANGES, PROMOTION_LABELS, ALL_LABELS, SUBJECTS,
 )
-from app.services.keyword_scorer import score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD
+from app.services.keyword_scorer import (
+    score_text, is_enabled as prefilter_enabled,
+    PREFILTER_THRESHOLD, NEWS_PREFILTER_THRESHOLD,
+)
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
@@ -46,8 +50,11 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                   flush=True)
         try:
             text = f"{article.get('title') or ''} {article['content']}"
+            # 언론은 완화된 임계치 적용 — 키워드 점수가 아주 낮은 뉴스만 Gemini 없이 스킵
+            threshold = (NEWS_PREFILTER_THRESHOLD if article.get("source_type") == "언론"
+                         else PREFILTER_THRESHOLD)
             kw_score = score_text(text) if prefilter_enabled() else -1
-            if 0 <= kw_score < PREFILTER_THRESHOLD:
+            if 0 <= kw_score < threshold:
                 supabase.table("crawled_articles").update({
                     "false_score":  5,
                     "false_level":  "낮음",
@@ -80,6 +87,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                 supabase.table("crawled_articles").update(update_fields).eq("id", article["id"]).execute()
 
             analyzed += 1
+            progress.count_risk(result["false_level"])
         except Exception as e:
             if "RESOURCE_EXHAUSTED" in str(e):
                 print("[analyzer] Gemini 크레딧/쿼터 소진 — 배치 중단. "
