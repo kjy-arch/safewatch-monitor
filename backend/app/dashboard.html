@@ -127,8 +127,8 @@
     <div class="grid">
       <div class="tile"><div class="k">이번 수집</div><div class="v" id="mCollected">0</div></div>
       <div class="tile"><div class="k">분류 완료</div><div class="v" id="mAnalyzed">0</div></div>
-      <div class="tile dang"><div class="k">위험 높음(누적)</div><div class="v" id="mHigh">0</div></div>
-      <div class="tile warn"><div class="k">위험 중간(누적)</div><div class="v" id="mMid">0</div></div>
+      <div class="tile dang"><div class="k">위험 높음</div><div class="v" id="mHigh">0</div></div>
+      <div class="tile warn"><div class="k">위험 중간</div><div class="v" id="mMid">0</div></div>
     </div>
 
     <div class="card">
@@ -213,6 +213,8 @@ async function pollStatus() {
     $("phaseText").textContent = ptxt;
     $("mCollected").textContent = s.collected ?? 0;
     $("mAnalyzed").textContent = s.analyzed ?? 0;
+    $("mHigh").textContent = s.high ?? 0;   // 이번 실행분 (수집 시작 시 0으로 초기화)
+    $("mMid").textContent  = s.mid ?? 0;
     const done = s.status === "done";
     const mark = (active, ok) => ok ? "✓" : (active ? "●" : "○");
     const crawlOk = done || s.phase === "분류" || s.phase === "알림";
@@ -229,9 +231,7 @@ async function pollStatus() {
 async function pollStats() {
   try {
     const st = await (await fetch("/api/stats")).json();
-    const lvl = st.by_level || {};
-    $("mHigh").textContent = lvl["높음"] || 0;
-    $("mMid").textContent  = lvl["중간"] || 0;
+    // 위험 높음/중간은 이번 실행분(progress)에서 표시 — pollStatus가 갱신.
     const src = st.by_source || {};
     const entries = Object.entries(src).filter(([k]) => k !== "-").sort((a,b) => b[1]-a[1]);
     const max = Math.max(1, ...entries.map(e => e[1]));
