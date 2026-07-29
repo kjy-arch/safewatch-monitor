@@ -1,5 +1,5 @@
 import holidays
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.core.database import supabase
@@ -20,6 +20,15 @@ scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 # 한국 공휴일 (매년 자동 갱신)
 KR_HOLIDAYS = holidays.KR()
 
+# 소스 위험 분류 — 안전(공식 API)은 기본 수집, 회색(스크래핑·비공식)은 화면에서 명시 선택 시에만.
+# (D2~D6 미확정 — 잠정 분류. 디시는 회색으로 둠.)
+SAFE_TYPES = {"naver_news", "naver_blog", "naver_cafe", "naver_kin", "youtube"}
+GRAY_TYPES = {"dcinside", "fmkorea", "instagram", "x", "tiktok"}
+
+
+def tier_of(source_type: str) -> str:
+    return "safe" if source_type in SAFE_TYPES else "gray"
+
 
 def _is_workday() -> bool:
     """오늘이 근무일(월~금, 공휴일 제외)인지 확인."""
@@ -31,8 +40,12 @@ def _is_workday() -> bool:
     return True
 
 
-def run_crawl_and_analyze(force: bool = False):
-    """크롤링 → AI 분류 → 알림. 스케줄 실행은 근무일에만, 수동 실행(force)은 항상."""
+def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
+    """크롤링 → AI 분류 → 알림. 스케줄 실행은 근무일에만, 수동 실행(force)은 항상.
+
+    source_ids가 주어지면 그 소스만 수집(화면에서 선택한 것). None이면 안전 소스만
+    수집한다 — 회색지대(스크래핑·비공식) 소스는 명시적으로 선택해야만 실행된다.
+    """
     if not force and not _is_workday():
         holiday_name = KR_HOLIDAYS.get(date.today(), "주말")
         print(f"[스케줄러] 오늘은 {holiday_name} — 크롤링 건너뜀")
@@ -44,6 +57,18 @@ def run_crawl_and_analyze(force: bool = False):
 
     print(f"[스케줄러] 크롤링 시작")
     sources = supabase.table("crawl_sources").select("*").eq("is_active", True).execute().data
+    if source_ids is not None:
+        wanted = set(source_ids)
+        sources = [s for s in sources if s["id"] in wanted]
+    else:
+        sources = [s for s in sources if s["source_type"] in SAFE_TYPES]
+
+    # 감사 로그 — 회색지대 소스를 포함해 실행한 경우 시각과 함께 기록 (누가·언제는 D4에서 확장)
+    gray = [s["name"] for s in sources if s["source_type"] in GRAY_TYPES]
+    if gray:
+        ts = datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
+        print(f"[감사] {ts} 회색지대 소스 포함 실행: {', '.join(gray)}")
+
     progress.start(len(sources))
 
     total_saved = 0
