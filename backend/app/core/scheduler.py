@@ -102,7 +102,8 @@ def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
 
         print(f"  {src['name']}: {n}건 수집")
         total_saved += n
-        progress.crawl_step(done=i, collected=total_saved)
+        progress.crawl_step(done=i, collected=total_saved,
+                            source_name=src["name"], saved=n)
 
     summary = f"[스케줄러] 총 {total_saved}건 수집 완료"
     if failed_sources:

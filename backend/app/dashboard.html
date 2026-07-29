@@ -150,7 +150,7 @@
     </div>
 
     <div class="card">
-      <h3 class="sec">출처별 수집 (누적)</h3>
+      <h3 class="sec">출처별 수집 <span style="color:var(--muted);font-weight:400">· 이번 실행</span></h3>
       <div id="sources"><p class="foot">불러오는 중…</p></div>
     </div>
     <p class="foot" id="lastRun"></p>
@@ -241,25 +241,21 @@ async function pollStatus() {
       `<span>${mark(s.phase==="크롤링", crawlOk)} 크롤링</span>` +
       `<span>${mark(s.phase==="분류", clsOk)} AI 분류</span>` +
       `<span>${mark(s.phase==="알림", done)} 알림 발송</span>`;
+    renderSources(s.by_source || {});   // 이번 실행 출처별 (크롤링 중 실시간 갱신)
     if (s.finished_at)
       $("lastRun").textContent = "최근 실행 완료: " + s.finished_at.replace("T"," ").slice(0,19)
         + (s.message ? " — " + s.message : "");
   } catch (e) {}
 }
-async function pollStats() {
-  try {
-    const st = await (await fetch("/api/stats")).json();
-    // 위험 높음/중간은 이번 실행분(progress)에서 표시 — pollStatus가 갱신.
-    const src = st.by_source || {};
-    const entries = Object.entries(src).filter(([k]) => k !== "-").sort((a,b) => b[1]-a[1]);
-    const max = Math.max(1, ...entries.map(e => e[1]));
-    $("sources").innerHTML = entries.length
-      ? entries.map(([k,v]) =>
-          `<div class="srcrow"><span class="name">${esc(k)}</span>` +
-          `<span class="mini"><i style="width:${Math.round(v/max*100)}%"></i></span>` +
-          `<span class="cnt">${v}</span></div>`).join("")
-      : '<p class="foot">아직 수집된 데이터가 없습니다.</p>';
-  } catch (e) {}
+function renderSources(src) {
+  const entries = Object.entries(src).sort((a,b) => b[1]-a[1]);
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  $("sources").innerHTML = entries.length
+    ? entries.map(([k,v]) =>
+        `<div class="srcrow"><span class="name">${esc(k)}</span>` +
+        `<span class="mini"><i style="width:${Math.round(v/max*100)}%"></i></span>` +
+        `<span class="cnt">${v}</span></div>`).join("")
+    : '<p class="foot">수집을 시작하면 출처별 건수가 실시간으로 표시됩니다.</p>';
 }
 const TYPE_LABEL = {
   naver_news:"네이버 뉴스", naver_blog:"네이버 블로그", naver_cafe:"네이버 카페",
@@ -350,9 +346,8 @@ async function pollClassify() {
   if (running) setTimeout(pollClassify, 1500);
 }
 
-pollStatus(); pollStats(); loadSources();
-setInterval(pollStatus, 1500);
-setInterval(pollStats, 5000);
+pollStatus(); loadSources();
+setInterval(pollStatus, 1500);   // 진행률·건수·출처별 모두 이번 실행 기준으로 갱신
 </script>
 </body>
 </html>
