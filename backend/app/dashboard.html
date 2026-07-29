@@ -89,6 +89,15 @@
   .res.mid  .chip.score { color: var(--warn); }
   .res.low  .chip.score { color: var(--ok); }
   .hidden { display: none; }
+  .srcpick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+  @media (max-width: 560px) { .srcpick { grid-template-columns: 1fr; } }
+  .srcpick .grp { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-weight: 600; margin: 8px 0 2px; }
+  .srcpick label { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+  .srcpick label.locked { color: var(--muted); cursor: default; }
+  .srcpick .tag { font-size: 11px; padding: 1px 7px; border-radius: 5px; background: var(--track); color: var(--muted); margin-left: auto; }
+  .srcpick .tag.g { background: var(--warn-bg); color: var(--warn); }
+  .warnbox { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; line-height: 1.5; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -109,6 +118,15 @@
       <a class="dl primary" href="/api/articles/export?scope=today">📥 오늘 결과 엑셀 다운로드</a>
       <a class="dl" href="/api/articles/export?scope=all">전체 엑셀</a>
       <a class="dl" href="/api/articles/export?scope=all&false_level=높음">위험 높음만</a>
+    </div>
+
+    <div class="card">
+      <div class="rowtop"><div>
+        <h2>수집 소스 선택</h2>
+        <p>안전 소스는 항상 포함 · 회색 소스는 선택할 때만 이번 실행에 수집됩니다.</p>
+      </div></div>
+      <div class="srcpick" id="srcpick"><p class="foot">불러오는 중…</p></div>
+      <div class="warnbox" id="grayWarn" style="display:none">⚠️ 회색지대 소스(스크래핑·비공식 접근)는 플랫폼 약관·법적 리스크가 있어 기관 법무·정보보안 검토가 필요합니다. 선택 시 이번 실행에만 포함되며 서버 로그에 감사 기록으로 남습니다.</div>
     </div>
 
     <div class="card">
@@ -243,9 +261,46 @@ async function pollStats() {
       : '<p class="foot">아직 수집된 데이터가 없습니다.</p>';
   } catch (e) {}
 }
+const TYPE_LABEL = {
+  naver_news:"네이버 뉴스", naver_blog:"네이버 블로그", naver_cafe:"네이버 카페",
+  naver_kin:"네이버 지식인", youtube:"유튜브", dcinside:"디시인사이드",
+  fmkorea:"에펨코리아", instagram:"인스타그램", x:"X", tiktok:"틱톡",
+};
+async function loadSources() {
+  let rows;
+  try { rows = await (await fetch("/api/crawl/sources")).json(); } catch (e) { return; }
+  const safe = rows.filter(r => r.tier === "safe");
+  const gray = rows.filter(r => r.tier === "gray");
+  const label = r => TYPE_LABEL[r.source_type] || r.name;
+  let html = "";
+  if (safe.length) {
+    html += `<div class="grp">안전 (항상 수집)</div>`;
+    html += safe.map(r =>
+      `<label class="locked"><input type="checkbox" data-id="${r.id}" checked disabled>${esc(label(r))}<span class="tag">안전</span></label>`
+    ).join("");
+  }
+  if (gray.length) {
+    html += `<div class="grp">회색 (선택 시 수집)</div>`;
+    html += gray.map(r => r.is_active
+      ? `<label><input type="checkbox" data-id="${r.id}" class="graychk">${esc(label(r))}<span class="tag g">회색</span></label>`
+      : `<label class="locked"><input type="checkbox" disabled>${esc(label(r))}<span class="tag">비활성·자격증명 필요</span></label>`
+    ).join("");
+  }
+  $("srcpick").innerHTML = html || '<p class="foot">등록된 소스가 없습니다.</p>';
+  $("grayWarn").style.display = gray.some(r => r.is_active) ? "block" : "none";
+}
 async function startCrawl() {
+  const ids = [...document.querySelectorAll("#srcpick input[type=checkbox]:checked")]
+    .map(el => el.dataset.id).filter(Boolean);
+  const graySel = [...document.querySelectorAll("#srcpick input.graychk:checked")].length;
+  if (graySel && !confirm(`회색지대 소스 ${graySel}개를 포함해 수집합니다. 계속할까요?`)) return;
   $("start").disabled = true; $("start").textContent = "시작 중…";
-  try { await fetch("/api/crawl/run", { method: "POST" }); } catch (e) {}
+  try {
+    await fetch("/api/crawl/run", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ source_ids: ids }),
+    });
+  } catch (e) {}
   setTimeout(pollStatus, 500);
 }
 
@@ -295,7 +350,7 @@ async function pollClassify() {
   if (running) setTimeout(pollClassify, 1500);
 }
 
-pollStatus(); pollStats();
+pollStatus(); pollStats(); loadSources();
 setInterval(pollStatus, 1500);
 setInterval(pollStats, 5000);
 </script>

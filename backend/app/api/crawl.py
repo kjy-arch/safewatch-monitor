@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Body
 from fastapi.responses import Response
-from app.core.scheduler import run_crawl_and_analyze
+from app.core.scheduler import run_crawl_and_analyze, tier_of
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import _build_excel
 from app.services import excel_classifier
@@ -13,12 +13,31 @@ router = APIRouter(tags=["crawl"])
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+@router.get("/crawl/sources")
+def crawl_sources_list():
+    """수집 소스 목록 + 위험 분류(safe/gray) — 대시보드 소스 선택용."""
+    rows = (
+        supabase.table("crawl_sources")
+        .select("id, name, source_type, is_active")
+        .order("source_type")
+        .execute()
+        .data
+    )
+    for r in rows:
+        r["tier"] = tier_of(r["source_type"])
+    return rows
+
+
 @router.post("/crawl/run")
-def manual_crawl(background_tasks: BackgroundTasks):
-    """수동으로 전체 크롤링 + 분류 실행 (주말·공휴일에도 강제 실행)."""
+def manual_crawl(background_tasks: BackgroundTasks, body: dict = Body(default=None)):
+    """수동 크롤링 + 분류 실행.
+
+    body.source_ids가 주어지면 그 소스만, 없으면 안전 소스만 수집(회색은 명시 선택 필요).
+    """
     if progress.is_running():
         return {"message": "이미 수집이 진행 중입니다."}
-    background_tasks.add_task(run_crawl_and_analyze, True)
+    source_ids = (body or {}).get("source_ids")
+    background_tasks.add_task(run_crawl_and_analyze, True, source_ids)
     return {"message": "크롤링 시작됨. 잠시 후 결과를 확인하세요."}
 
 
