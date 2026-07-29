@@ -17,6 +17,7 @@ _state: dict = {
     "analyzed":    0,        # 이번 실행 분류 건수
     "high":        0,        # 이번 실행 위험 높음 건수
     "mid":         0,        # 이번 실행 위험 중간 건수
+    "by_source":   {},       # 이번 실행 출처별 수집 건수 {소스명: 건수}
     "started_at":  None,
     "finished_at": None,
     "message":     "",
@@ -37,14 +38,17 @@ def start(total_sources: int) -> None:
         _state.update(
             status="running", phase="크롤링",
             phase_done=0, phase_total=total_sources,
-            collected=0, analyzed=0, high=0, mid=0,
+            collected=0, analyzed=0, high=0, mid=0, by_source={},
             started_at=_now(), finished_at=None, message="",
         )
 
 
-def crawl_step(done: int, collected: int) -> None:
+def crawl_step(done: int, collected: int, source_name: str = "", saved: int = 0) -> None:
+    """크롤링 진행 갱신. source_name이 주어지면 이번 실행 출처별 건수도 기록."""
     with _lock:
         _state.update(phase="크롤링", phase_done=done, collected=collected)
+        if source_name:
+            _state["by_source"][source_name] = saved
 
 
 def start_classify() -> None:
@@ -85,6 +89,7 @@ def snapshot() -> dict:
     """현재 상태 + 계산된 진행률(%). 진행률은 현재 단계의 처리/전체 비율."""
     with _lock:
         s = dict(_state)
+        s["by_source"] = dict(_state["by_source"])  # 호출자가 내부 상태를 변경하지 못하게 복사
     total = s["phase_total"]
     if s["status"] == "done":
         s["percent"] = 100
