@@ -12,6 +12,7 @@ from app.crawlers.x import crawl_x
 from app.crawlers.tiktok import crawl_tiktok
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import send_alerts
+from app.services import exporter
 from app.core import progress
 from app.core.config import settings
 
@@ -121,6 +122,16 @@ def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
                 progress.start_notify()
                 send_alerts()
                 print("[스케줄러] 알림 발송 완료")
+
+            # 결과 엑셀을 파일로 저장 (기본: 사용자 다운로드 폴더)
+            try:
+                path = exporter.save_export(scope="today")
+                if path:
+                    progress.set_export_path(path)
+                    print(f"[스케줄러] 결과 엑셀 저장: {path}")
+            except Exception as e:
+                # 저장 실패가 수집·분류 결과를 무효화하진 않으므로 로그만 남긴다
+                print(f"[스케줄러] 엑셀 저장 실패: {type(e).__name__}: {e}")
         progress.finish(summary)
     except Exception as e:
         progress.fail(f"{type(e).__name__}: {e}")

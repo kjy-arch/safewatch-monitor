@@ -140,7 +140,7 @@
       <div class="barlabel"><span id="phaseText">대기 중</span><span class="pct" id="pct">0%</span></div>
       <div class="track"><div class="fill" id="fill"></div></div>
       <div class="steps" id="steps"></div>
-      <p class="foot" id="dlNote">완료되면 결과 엑셀이 다운로드 폴더에 자동 저장됩니다.</p>
+      <p class="foot" id="dlNote">완료되면 결과 엑셀이 다운로드 폴더에 자동 저장됩니다 (서버가 직접 저장).</p>
     </div>
 
     <div class="grid">
@@ -214,27 +214,19 @@ function badgeFor(s) {
   }
   return ["", "대기 중"];
 }
-/* 수집 완료 시 결과 엑셀 자동 다운로드 (브라우저 기본 다운로드 폴더에 저장).
-   finished_at이 바뀌는 순간만 1회 실행 — 새로고침·폴링 반복으로 중복 다운로드되지 않게 한다. */
-let seenFinishedAt = null, statusReady = false;
-function autoDownload(s) {
-  if (s.status !== "done" || !s.finished_at) return;
-  const isNewRun = statusReady && s.finished_at !== seenFinishedAt;
-  seenFinishedAt = s.finished_at;
-  if (!isNewRun) return;
-  if (!(s.collected > 0)) { $("dlNote").textContent = "수집 0건 — 엑셀 다운로드 생략"; return; }
-  // download 속성은 두지 않는다 — 서버의 Content-Disposition 파일명
-  // (safewatch_today_YYYYMMDD.xlsx)이 그대로 쓰이게 하려고.
-  const a = document.createElement("a");
-  a.href = "/api/articles/export?scope=today";
-  document.body.appendChild(a); a.click(); a.remove();
-  $("dlNote").textContent = `✅ 수집 완료 — 결과 엑셀을 다운로드 폴더에 저장했습니다 (${s.collected}건)`;
+/* 결과 엑셀은 서버가 직접 파일로 저장한다(브라우저 다운로드 설정과 무관).
+   저장 경로를 진행 카드 하단에 표시. */
+function showExport(s) {
+  if (s.status !== "done") return;
+  if (s.export_path)
+    $("dlNote").textContent = "✅ 결과 엑셀 저장됨: " + s.export_path;
+  else if (!(s.collected > 0))
+    $("dlNote").textContent = "수집 0건 — 엑셀 저장 생략";
 }
 async function pollStatus() {
   try {
     const s = await (await fetch("/api/crawl/status")).json();
-    autoDownload(s);
-    statusReady = true;
+    showExport(s);
     const [cls, txt] = badgeFor(s);
     const b = $("badge"); b.className = "badge " + cls; b.textContent = txt;
     const running = s.status === "running";
