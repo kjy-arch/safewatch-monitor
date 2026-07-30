@@ -113,7 +113,8 @@ def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
     try:
         if total_saved > 0:
             progress.start_classify()
-            analyzed = analyze_unclassified(limit=total_saved + 10,
+            # 이번에 저장한 건수만 분류 — 화면의 '이번 수집'과 분류 대상 수가 일치한다.
+            analyzed = analyze_unclassified(limit=total_saved,
                                             progress_cb=progress.classify_step)
             print(f"[스케줄러] AI 분류: {analyzed}건 완료")
             if analyzed > 0:
