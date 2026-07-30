@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from app.core.scheduler import run_crawl_and_analyze, tier_of
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import _build_excel
-from app.services import excel_classifier
+from app.services import excel_classifier, exporter
 from app.core.database import supabase
 from app.core import progress
 
@@ -50,16 +50,7 @@ def crawl_status():
 @router.get("/articles/export")
 def export_articles(scope: str = "today", false_level: str = None):
     """수집 결과를 엑셀(.xlsx)로 다운로드. scope=today(오늘) | all(전체)."""
-    query = supabase.table("crawled_articles").select("*, departments(name)")
-
-    if scope == "today":
-        now_kst = datetime.now(timezone(timedelta(hours=9)))
-        today_start = now_kst.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-        query = query.gte("created_at", today_start.isoformat())
-    if false_level:
-        query = query.eq("false_level", false_level)
-
-    articles = query.order("false_score", desc=True).limit(5000).execute().data
+    articles = exporter.fetch_articles(scope, false_level)
     xlsx = _build_excel(articles)
 
     stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")

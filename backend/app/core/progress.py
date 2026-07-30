@@ -18,6 +18,7 @@ _state: dict = {
     "high":        0,        # 이번 실행 위험 높음 건수
     "mid":         0,        # 이번 실행 위험 중간 건수
     "by_source":   {},       # 이번 실행 출처별 수집 건수 {소스명: 건수}
+    "export_path": "",       # 이번 실행 결과 엑셀 저장 경로
     "started_at":  None,
     "finished_at": None,
     "message":     "",
@@ -38,7 +39,7 @@ def start(total_sources: int) -> None:
         _state.update(
             status="running", phase="크롤링",
             phase_done=0, phase_total=total_sources,
-            collected=0, analyzed=0, high=0, mid=0, by_source={},
+            collected=0, analyzed=0, high=0, mid=0, by_source={}, export_path="",
             started_at=_now(), finished_at=None, message="",
         )
 
@@ -85,6 +86,11 @@ def start_notify() -> None:
 def finish(message: str = "") -> None:
     with _lock:
         _state.update(status="done", phase="완료", finished_at=_now(), message=message)
+
+
+def set_export_path(path: str) -> None:
+    with _lock:
+        _state["export_path"] = path
 
 
 def fail(message: str) -> None:
