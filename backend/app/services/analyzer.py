@@ -25,10 +25,13 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
 
     progress_cb(done, total)가 주어지면 매 건 처리 시작 시 호출해 진행률을 보고한다.
     """
+    # 최신 저장분부터 분류 — 방금 수집한 기사가 오래된 미분류 백로그에 밀리지 않게.
+    # (백로그는 수동 '미분류 분류'(POST /api/crawl/analyze)로 따로 소진한다.)
     query = (
         supabase.table("crawled_articles")
         .select("id, title, content, source_type")
         .is_("false_score", "null")
+        .order("created_at", desc=True)
     )
     if _failed_ids:
         query = query.not_.in_("id", list(_failed_ids)[:_FAILED_IDS_MAX])
@@ -64,6 +67,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                 }).eq("id", article["id"]).execute()
                 prefiltered += 1
                 analyzed += 1
+                progress.count_analyzed()
                 continue
 
             result = _analyze(article.get("title") or "", article["content"],
@@ -87,6 +91,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                 supabase.table("crawled_articles").update(update_fields).eq("id", article["id"]).execute()
 
             analyzed += 1
+            progress.count_analyzed()
             progress.count_risk(result["false_level"])
         except Exception as e:
             if "RESOURCE_EXHAUSTED" in str(e):

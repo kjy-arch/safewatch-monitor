@@ -57,8 +57,15 @@ def start_classify() -> None:
 
 
 def classify_step(done: int, total: int) -> None:
+    """분류 진행률(몇 번째 처리 중) 갱신 — 성공 건수는 count_analyzed로 따로 센다."""
     with _lock:
-        _state.update(phase="분류", phase_done=done, phase_total=total, analyzed=done)
+        _state.update(phase="분류", phase_done=done, phase_total=total)
+
+
+def count_analyzed() -> None:
+    """실제로 분류가 저장된 건수만 증가 (실패분은 세지 않음)."""
+    with _lock:
+        _state["analyzed"] += 1
 
 
 def count_risk(level: str) -> None:
