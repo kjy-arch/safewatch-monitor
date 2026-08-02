@@ -143,6 +143,25 @@
       <p class="foot" id="dlNote">완료되면 결과 엑셀이 다운로드 폴더에 자동 저장됩니다 (서버가 직접 저장).</p>
     </div>
 
+    <div class="card">
+      <div class="rowtop">
+        <div>
+          <h2>미분류 분류 <span id="backlogCnt" style="color:var(--warn)"></span></h2>
+          <p>수집 없이, 아직 분류되지 않은 기사만 AI로 분류합니다.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="anLimit" style="height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:14px">
+            <option value="50">50건</option>
+            <option value="100" selected>100건</option>
+            <option value="300">300건</option>
+            <option value="1000">전체</option>
+          </select>
+          <button id="anBtn" class="primary" onclick="startAnalyze()">분류 실행</button>
+        </div>
+      </div>
+      <p class="foot" id="anNote">⚠️ 분류 1건당 Gemini API가 호출됩니다(사전필터 통과분 제외). 배치 크기를 확인하고 실행하세요.</p>
+    </div>
+
     <div class="grid">
       <div class="tile"><div class="k">이번 수집</div><div class="v" id="mCollected">0</div></div>
       <div class="tile"><div class="k">분류 완료</div><div class="v" id="mAnalyzed">0</div></div>
@@ -216,8 +235,11 @@ function badgeFor(s) {
 }
 /* 결과 엑셀은 서버가 직접 파일로 저장한다(브라우저 다운로드 설정과 무관).
    저장 경로를 진행 카드 하단에 표시. */
+let lastFinished = null;
 function showExport(s) {
   if (s.status !== "done") return;
+  // 실행이 끝난 순간에만 백로그 건수를 다시 조회 (매 폴링마다 count 쿼리하지 않게)
+  if (s.finished_at !== lastFinished) { lastFinished = s.finished_at; loadBacklog(); }
   if (s.export_path)
     $("dlNote").textContent = "✅ 결과 엑셀 저장됨: " + s.export_path;
   else if (!(s.collected > 0))
@@ -232,6 +254,8 @@ async function pollStatus() {
     const running = s.status === "running";
     $("start").disabled = running;
     $("start").textContent = running ? "수집 중…" : "수동 수집 시작";
+    $("anBtn").disabled = running;   // 수집·분류 중엔 중복 실행 방지
+    $("anBtn").textContent = running ? "실행 중…" : "분류 실행";
     const pct = s.percent || 0;
     $("fill").style.width = pct + "%"; $("pct").textContent = pct + "%";
     let ptxt = "대기 중";
@@ -296,6 +320,27 @@ async function loadSources() {
   $("srcpick").innerHTML = html || '<p class="foot">등록된 소스가 없습니다.</p>';
   $("grayWarn").style.display = gray.some(r => r.is_active) ? "block" : "none";
 }
+async function loadBacklog() {
+  try {
+    const r = await (await fetch("/api/crawl/backlog")).json();
+    const n = r.unclassified ?? 0;
+    $("backlogCnt").textContent = n ? `· ${n.toLocaleString()}건 남음` : "· 없음";
+    $("anBtn").disabled = n === 0;
+  } catch (e) {}
+}
+async function startAnalyze() {
+  const limit = $("anLimit").value;
+  if (!confirm(`미분류 기사를 최대 ${limit}건 분류합니다. Gemini API 비용이 발생합니다. 계속할까요?`)) return;
+  $("anBtn").disabled = true; $("anBtn").textContent = "시작 중…";
+  try {
+    const r = await (await fetch("/api/crawl/analyze", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ limit: Number(limit) }),
+    })).json();
+    $("anNote").textContent = r.message;
+  } catch (e) { $("anNote").textContent = "분류 시작 실패"; }
+  setTimeout(pollStatus, 500);
+}
 async function startCrawl() {
   const ids = [...document.querySelectorAll("#srcpick input[type=checkbox]:checked")]
     .map(el => el.dataset.id).filter(Boolean);
@@ -357,7 +402,7 @@ async function pollClassify() {
   if (running) setTimeout(pollClassify, 1500);
 }
 
-pollStatus(); loadSources();
+pollStatus(); loadSources(); loadBacklog();
 setInterval(pollStatus, 1500);   // 진행률·건수·출처별 모두 이번 실행 기준으로 갱신
 </script>
 </body>

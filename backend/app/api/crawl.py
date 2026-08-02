@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Body
 from fastapi.responses import Response
-from app.core.scheduler import run_crawl_and_analyze, tier_of
+from app.core.scheduler import run_crawl_and_analyze, run_analyze_only, tier_of
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import _build_excel
 from app.services import excel_classifier, exporter
@@ -115,11 +115,30 @@ def classify_export():
     )
 
 
+@router.get("/crawl/backlog")
+def crawl_backlog():
+    """미분류(백로그) 건수 — 대시보드 표시용."""
+    n = (
+        supabase.table("crawled_articles")
+        .select("id", count="exact")
+        .is_("false_score", "null")
+        .execute()
+        .count
+    )
+    return {"unclassified": n}
+
+
 @router.post("/crawl/analyze")
-def manual_analyze(background_tasks: BackgroundTasks):
-    """미분류 기사만 AI 분류 실행."""
-    background_tasks.add_task(analyze_unclassified, 30)
-    return {"message": "AI 분류 시작됨."}
+def manual_analyze(background_tasks: BackgroundTasks, body: dict = Body(default=None)):
+    """미분류 백로그를 AI 분류. body.limit로 이번 배치 건수 지정(기본 100)."""
+    if progress.is_running():
+        return {"message": "이미 실행 중입니다."}
+    try:
+        limit = max(1, int((body or {}).get("limit") or 100))
+    except (TypeError, ValueError):
+        limit = 100
+    background_tasks.add_task(run_analyze_only, limit)
+    return {"message": f"미분류 분류 시작 (최대 {limit}건)"}
 
 
 @router.get("/articles")
