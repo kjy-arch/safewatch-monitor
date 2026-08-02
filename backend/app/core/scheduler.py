@@ -138,6 +138,23 @@ def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
         raise
 
 
+def run_analyze_only(limit: int = 100):
+    """수집 없이 미분류 백로그만 분류 (대시보드 '미분류 분류' 버튼용)."""
+    if progress.is_running():
+        print("[분류] 이미 실행 중 — 건너뜀")
+        return
+
+    progress.start_analyze(limit)
+    try:
+        analyzed = analyze_unclassified(limit=limit, progress_cb=progress.classify_step)
+        summary = f"미분류 {analyzed}건 분류 완료"
+        print(f"[분류] {summary}")
+        progress.finish(summary)
+    except Exception as e:
+        progress.fail(f"{type(e).__name__}: {e}")
+        raise
+
+
 def start_scheduler():
     if scheduler.running:
         return

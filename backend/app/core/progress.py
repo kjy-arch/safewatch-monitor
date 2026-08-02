@@ -44,6 +44,17 @@ def start(total_sources: int) -> None:
         )
 
 
+def start_analyze(total: int) -> None:
+    """분류만 실행(미분류 백로그 소진) 시작 — 수집 단계 없이 분류 단계부터."""
+    with _lock:
+        _state.update(
+            status="running", phase="분류",
+            phase_done=0, phase_total=total,
+            collected=0, analyzed=0, high=0, mid=0, by_source={}, export_path="",
+            started_at=_now(), finished_at=None, message="",
+        )
+
+
 def crawl_step(done: int, collected: int, source_name: str = "", saved: int = 0) -> None:
     """크롤링 진행 갱신. source_name이 주어지면 이번 실행 출처별 건수도 기록."""
     with _lock:
