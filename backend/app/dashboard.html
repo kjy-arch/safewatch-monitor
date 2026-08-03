@@ -186,6 +186,12 @@
           <div class="foot" style="margin:2px 0 8px">Monitor 수집 엑셀 또는 임의 엑셀 · '원문' 또는 '내용' 열이 있으면 됩니다.</div>
           <input type="file" id="xlfile" accept=".xlsx">
         </div>
+        <select id="clsLimit" style="height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:14px">
+          <option value="50">50건</option>
+          <option value="200" selected>200건</option>
+          <option value="500">500건</option>
+          <option value="5000">전체</option>
+        </select>
         <button id="clsBtn" class="primary" onclick="classifyExcel()">분류 실행</button>
       </div>
       <p class="foot" id="clsMsg"></p>
@@ -362,9 +368,11 @@ async function classifyExcel() {
   const f = $("xlfile").files[0];
   if (!f) { $("clsMsg").textContent = "먼저 엑셀 파일을 선택하세요."; return; }
   const fd = new FormData(); fd.append("file", f);
+  const limit = $("clsLimit").value;
   const btn = $("clsBtn"); btn.disabled = true; btn.textContent = "업로드 중…";
   try {
-    const r = await (await fetch("/api/classify/excel", { method: "POST", body: fd })).json();
+    const r = await (await fetch(`/api/classify/excel?limit=${limit}`,
+                                 { method: "POST", body: fd })).json();
     $("clsMsg").textContent = r.message + (r.total ? ` (${r.total}건)` : "");
     $("cTotal").textContent = r.total || 0;
   } catch (e) { $("clsMsg").textContent = "업로드 실패"; }
@@ -376,8 +384,13 @@ async function pollClassify() {
   const running = s.status === "running";
   const pct = s.percent || 0;
   $("clsFill").style.width = pct + "%"; $("clsPct").textContent = pct + "%";
+  // 중단(크레딧 소진 등)됐으면 '완료'로 보이지 않게 실제 처리 건수와 사유를 표시
+  const stopped = s.status === "done" && s.total && s.done < s.total;
   $("clsPhase").textContent = running ? `분류 중 · ${s.done}/${s.total}건`
-                          : (s.status === "done" ? "완료" : "대기 중");
+    : s.status !== "done" ? "대기 중"
+    : stopped ? `중단됨 · ${s.done}/${s.total}건 처리` : `완료 · ${s.done}건`;
+  if (s.status === "done" && s.message)
+    $("clsMsg").textContent = "⚠️ " + s.message;
   const btn = $("clsBtn"); btn.disabled = running; btn.textContent = running ? "분류 중…" : "분류 실행";
 
   const rs = (s.results || []).slice().sort((a,b) => (b.false_score||0) - (a.false_score||0));

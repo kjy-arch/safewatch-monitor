@@ -91,9 +91,8 @@ def snapshot() -> dict:
     with _lock:
         s = dict(_state)
         s["results"] = list(_results)
-    s["percent"] = 100 if s["status"] == "done" else (
-        round(s["done"] / s["total"] * 100) if s["total"] else 0
-    )
+    # 실제 처리 비율로 계산 — 중단(크레딧 소진 등)됐는데 100%로 보이지 않게 한다.
+    s["percent"] = round(s["done"] / s["total"] * 100) if s["total"] else 0
     return s
 
 
@@ -121,9 +120,13 @@ def run(rows: list[dict], limit: int = 200) -> None:
                 res = _analyze(title, text, r.get("source") or "", departments)
         except Exception as e:
             if "RESOURCE_EXHAUSTED" in str(e):
+                msg = (f"Gemini 크레딧/쿼터 소진 — {i - 1}건 처리 후 중단. "
+                       "결제·쿼터 확인 후 다시 실행하세요.")
+                print(f"[excel_classifier] {msg}", flush=True)
                 with _lock:
-                    _state.update(message="Gemini 크레딧/쿼터 소진 — 일부만 분류됨")
+                    _state.update(message=msg)
                 break
+            print(f"[excel_classifier] {i}번째 분류 실패: {type(e).__name__}: {e}", flush=True)
             res = {"label_l2": "오류", "subject": "", "false_score": None,
                    "false_level": "미분류", "false_reason": f"{type(e).__name__}: {e}",
                    "department_name": None}
