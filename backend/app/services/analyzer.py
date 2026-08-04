@@ -7,8 +7,7 @@ from app.core import progress
 # Phase 2 — 수집분/업로드분이 같은 프롬프트·파서를 쓴다 (app/services/unified_prompt.py)
 from app.services.unified_prompt import SYSTEM_PROMPT, parse_unified
 from app.services.keyword_scorer import (
-    score_text, is_enabled as prefilter_enabled,
-    PREFILTER_THRESHOLD, NEWS_PREFILTER_THRESHOLD,
+    score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD,
 )
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
@@ -52,11 +51,9 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                   flush=True)
         try:
             text = f"{article.get('title') or ''} {article['content']}"
-            # 언론은 완화된 임계치 적용 — 키워드 점수가 아주 낮은 뉴스만 Gemini 없이 스킵
-            threshold = (NEWS_PREFILTER_THRESHOLD if article.get("source_type") == "언론"
-                         else PREFILTER_THRESHOLD)
+            # 출처와 무관하게 동일 임계치 (요구 Q7) — keyword_scorer 주석 참조
             kw_score = score_text(text) if prefilter_enabled() else -1
-            if 0 <= kw_score < threshold:
+            if 0 <= kw_score < PREFILTER_THRESHOLD:
                 supabase.table("crawled_articles").update({
                     "false_score":  5,
                     "false_level":  "낮음",

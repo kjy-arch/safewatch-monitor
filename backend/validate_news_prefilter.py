@@ -1,13 +1,14 @@
-"""언론 사전필터 임계치 검증 — NEWS_PREFILTER_THRESHOLD 근거 재현.
+"""언론 구간 사전필터 안전성 검증 — 단일 임계치가 언론에서도 안전한지 확인.
 
-일반 임계치(validate_prefilter.py)는 사람이 라벨링한 23~24년 자료 6,430건으로
-검증하지만, 그 자료에는 **출처 구분이 없다**(제목·내용·내용구분·과목뿐).
-따라서 언론 전용 임계치는 DB에 쌓인 분류 완료 언론 기사로 검증한다.
+사전필터 임계치는 출처와 무관하게 하나만 쓴다(요구 Q7). 다만 사람 라벨 자료
+(validate_prefilter.py가 쓰는 6,430건)에는 **출처 구분이 없어** 언론 구간에서
+위험 기사를 놓치지 않는지는 그 검증으로 알 수 없다. 이 스크립트가 그 구멍을 메운다.
 
   ⚠️ 한계: 여기서 쓰는 정답은 사람 라벨이 아니라 Gemini 분류 결과다.
-     일반 임계치만큼 강한 근거가 아니므로, 임계치를 올릴 때는 보수적으로 볼 것.
+     참고 지표로만 볼 것.
 
 기준: 위험(중간·높음) 언론을 하나도 스킵하지 않는 최대 임계치.
+현재 설정값이 그 이하이면 안전하다.
 
 사용법: .venv\\Scripts\\python.exe validate_news_prefilter.py
 """
@@ -15,9 +16,7 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8")
 
 from app.core.database import supabase
-from app.services.keyword_scorer import (
-    score_text, is_enabled, PREFILTER_THRESHOLD, NEWS_PREFILTER_THRESHOLD,
-)
+from app.services.keyword_scorer import score_text, is_enabled, PREFILTER_THRESHOLD
 
 RISK_LEVELS = ("중간", "높음")
 PAGE = 1000
@@ -76,15 +75,12 @@ def main():
             best = t
         print(f"{t:>4} | {skip_ratio*100:>10.1f}% | {risk_miss*100:>7.2f}% | {'OK' if ok else 'X'}")
 
-    print(f"\n권장 언론 임계치: {best} (위험 미스 0인 최대값)")
-    print(f"현재 설정값     : NEWS_PREFILTER_THRESHOLD = {NEWS_PREFILTER_THRESHOLD}"
-          f" (일반 {PREFILTER_THRESHOLD})")
-    if NEWS_PREFILTER_THRESHOLD > best:
-        print("  → ⚠️ 설정값이 권장값보다 큽니다. 위험 언론을 스킵할 수 있으니 낮추세요.")
-    elif NEWS_PREFILTER_THRESHOLD < best:
-        print("  → 설정값이 보수적입니다(안전). 비용을 더 줄이려면 권장값까지 올릴 수 있습니다.")
+    print(f"\n언론 무손실 상한: {best} (위험 미스 0인 최대 임계치)")
+    print(f"현재 설정값     : PREFILTER_THRESHOLD = {PREFILTER_THRESHOLD} (출처 공통)")
+    if PREFILTER_THRESHOLD > best:
+        print("  → ⚠️ 설정값이 상한을 넘습니다. 위험 언론을 스킵할 수 있으니 낮추세요.")
     else:
-        print("  → 일치. 조정 불필요.")
+        print("  → 안전. 단일 임계치가 언론 구간에서도 위험 기사를 놓치지 않습니다.")
 
 
 if __name__ == "__main__":
