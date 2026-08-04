@@ -7,8 +7,22 @@ from app.services.batch.excel import parse_excel, build_result_excel
 from app.services.batch.analyzer import analyze_batch
 from app.services.batch.stats import summarize
 from app.services.batch.app_settings import get_risk_threshold
+from app.services import run_log
 
 router = APIRouter(prefix="/batches", tags=["upload"])
+
+
+def _analyze_batch_logged(batch_id: str):
+    """분석 + 실행 이력 기록 — 누가 어떤 배치를 돌렸는지 남긴다 (Phase 3)."""
+    run_id = run_log.start("batch", batch_id=batch_id)
+    try:
+        result = analyze_batch(batch_id)
+        run_log.finish(run_id, analyzed=result.get("analyzed", 0),
+                       message=f"{result.get('total', 0)}건 중 {result.get('analyzed', 0)}건 분류"
+                               + (f" (실패 {result['failed']}건)" if result.get("failed") else ""))
+    except Exception as e:
+        run_log.fail(run_id, f"{type(e).__name__}: {e}")
+        raise
 
 
 def _ordered_articles(batch_id: str, columns: str = "*") -> list[dict]:
@@ -93,7 +107,7 @@ def start_analyze(batch_id: str, background_tasks: BackgroundTasks):
     batch = supabase.table("batches").select("id").eq("id", batch_id).execute().data
     if not batch:
         raise HTTPException(status_code=404, detail="배치를 찾을 수 없습니다.")
-    background_tasks.add_task(analyze_batch, batch_id)
+    background_tasks.add_task(_analyze_batch_logged, batch_id)
     return {"message": "분석 시작됨. 잠시 후 결과를 확인하세요. (미완료·실패 행만 분석되므로 실패분 재분석에도 사용 가능)", "batch_id": batch_id}
 
 
