@@ -1,5 +1,5 @@
 import holidays
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.core.database import supabase
@@ -12,6 +12,7 @@ from app.crawlers.x import crawl_x
 from app.crawlers.tiktok import crawl_tiktok
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import send_alerts
+from app.services import exporter
 from app.core import progress
 from app.core.config import settings
 
@@ -19,6 +20,15 @@ scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 
 # 한국 공휴일 (매년 자동 갱신)
 KR_HOLIDAYS = holidays.KR()
+
+# 소스 위험 분류 — 안전(공식 API)은 기본 수집, 회색(스크래핑·비공식)은 화면에서 명시 선택 시에만.
+# (D2~D6 미확정 — 잠정 분류. 디시는 회색으로 둠.)
+SAFE_TYPES = {"naver_news", "naver_blog", "naver_cafe", "naver_kin", "youtube"}
+GRAY_TYPES = {"dcinside", "fmkorea", "instagram", "x", "tiktok"}
+
+
+def tier_of(source_type: str) -> str:
+    return "safe" if source_type in SAFE_TYPES else "gray"
 
 
 def _is_workday() -> bool:
@@ -31,8 +41,12 @@ def _is_workday() -> bool:
     return True
 
 
-def run_crawl_and_analyze(force: bool = False):
-    """크롤링 → AI 분류 → 알림. 스케줄 실행은 근무일에만, 수동 실행(force)은 항상."""
+def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
+    """크롤링 → AI 분류 → 알림. 스케줄 실행은 근무일에만, 수동 실행(force)은 항상.
+
+    source_ids가 주어지면 그 소스만 수집(화면에서 선택한 것). None이면 안전 소스만
+    수집한다 — 회색지대(스크래핑·비공식) 소스는 명시적으로 선택해야만 실행된다.
+    """
     if not force and not _is_workday():
         holiday_name = KR_HOLIDAYS.get(date.today(), "주말")
         print(f"[스케줄러] 오늘은 {holiday_name} — 크롤링 건너뜀")
@@ -44,6 +58,18 @@ def run_crawl_and_analyze(force: bool = False):
 
     print(f"[스케줄러] 크롤링 시작")
     sources = supabase.table("crawl_sources").select("*").eq("is_active", True).execute().data
+    if source_ids is not None:
+        wanted = set(source_ids)
+        sources = [s for s in sources if s["id"] in wanted]
+    else:
+        sources = [s for s in sources if s["source_type"] in SAFE_TYPES]
+
+    # 감사 로그 — 회색지대 소스를 포함해 실행한 경우 시각과 함께 기록 (누가·언제는 D4에서 확장)
+    gray = [s["name"] for s in sources if s["source_type"] in GRAY_TYPES]
+    if gray:
+        ts = datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
+        print(f"[감사] {ts} 회색지대 소스 포함 실행: {', '.join(gray)}")
+
     progress.start(len(sources))
 
     total_saved = 0
@@ -77,7 +103,8 @@ def run_crawl_and_analyze(force: bool = False):
 
         print(f"  {src['name']}: {n}건 수집")
         total_saved += n
-        progress.crawl_step(done=i, collected=total_saved)
+        progress.crawl_step(done=i, collected=total_saved,
+                            source_name=src["name"], saved=n)
 
     summary = f"[스케줄러] 총 {total_saved}건 수집 완료"
     if failed_sources:
@@ -87,13 +114,41 @@ def run_crawl_and_analyze(force: bool = False):
     try:
         if total_saved > 0:
             progress.start_classify()
-            analyzed = analyze_unclassified(limit=total_saved + 10,
+            # 이번에 저장한 건수만 분류 — 화면의 '이번 수집'과 분류 대상 수가 일치한다.
+            analyzed = analyze_unclassified(limit=total_saved,
                                             progress_cb=progress.classify_step)
             print(f"[스케줄러] AI 분류: {analyzed}건 완료")
             if analyzed > 0:
                 progress.start_notify()
                 send_alerts()
                 print("[스케줄러] 알림 발송 완료")
+
+            # 결과 엑셀을 파일로 저장 (기본: 사용자 다운로드 폴더)
+            try:
+                path = exporter.save_export(scope="today")
+                if path:
+                    progress.set_export_path(path)
+                    print(f"[스케줄러] 결과 엑셀 저장: {path}")
+            except Exception as e:
+                # 저장 실패가 수집·분류 결과를 무효화하진 않으므로 로그만 남긴다
+                print(f"[스케줄러] 엑셀 저장 실패: {type(e).__name__}: {e}")
+        progress.finish(summary)
+    except Exception as e:
+        progress.fail(f"{type(e).__name__}: {e}")
+        raise
+
+
+def run_analyze_only(limit: int = 100):
+    """수집 없이 미분류 백로그만 분류 (대시보드 '미분류 분류' 버튼용)."""
+    if progress.is_running():
+        print("[분류] 이미 실행 중 — 건너뜀")
+        return
+
+    progress.start_analyze(limit)
+    try:
+        analyzed = analyze_unclassified(limit=limit, progress_cb=progress.classify_step)
+        summary = f"미분류 {analyzed}건 분류 완료"
+        print(f"[분류] {summary}")
         progress.finish(summary)
     except Exception as e:
         progress.fail(f"{type(e).__name__}: {e}")

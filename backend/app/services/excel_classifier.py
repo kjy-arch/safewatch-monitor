@@ -11,7 +11,8 @@ import openpyxl
 from app.core.database import supabase
 from app.services.analyzer import _analyze
 from app.services.keyword_scorer import (
-    score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD,
+    score_text, is_enabled as prefilter_enabled,
+    PREFILTER_THRESHOLD, NEWS_PREFILTER_THRESHOLD,
 )
 
 # 헤더 후보 — 본문/원문 열을 우선 탐지 (제목은 보조)
@@ -90,9 +91,8 @@ def snapshot() -> dict:
     with _lock:
         s = dict(_state)
         s["results"] = list(_results)
-    s["percent"] = 100 if s["status"] == "done" else (
-        round(s["done"] / s["total"] * 100) if s["total"] else 0
-    )
+    # 실제 처리 비율로 계산 — 중단(크레딧 소진 등)됐는데 100%로 보이지 않게 한다.
+    s["percent"] = round(s["done"] / s["total"] * 100) if s["total"] else 0
     return s
 
 
@@ -109,8 +109,10 @@ def run(rows: list[dict], limit: int = 200) -> None:
         text = r["text"]
         title = r.get("title") or ""
         try:
+            threshold = (NEWS_PREFILTER_THRESHOLD if (r.get("source") or "") == "언론"
+                         else PREFILTER_THRESHOLD)
             kw_score = score_text(f"{title} {text}") if prefilter_enabled() else -1
-            if 0 <= kw_score < PREFILTER_THRESHOLD:
+            if 0 <= kw_score < threshold:
                 res = {"label_l2": "단순내용", "subject": "기타", "false_score": 5,
                        "false_level": "낮음", "false_reason": f"키워드 사전필터 (점수 {kw_score})",
                        "department_name": None}
@@ -118,9 +120,13 @@ def run(rows: list[dict], limit: int = 200) -> None:
                 res = _analyze(title, text, r.get("source") or "", departments)
         except Exception as e:
             if "RESOURCE_EXHAUSTED" in str(e):
+                msg = (f"Gemini 크레딧/쿼터 소진 — {i - 1}건 처리 후 중단. "
+                       "결제·쿼터 확인 후 다시 실행하세요.")
+                print(f"[excel_classifier] {msg}", flush=True)
                 with _lock:
-                    _state.update(message="Gemini 크레딧/쿼터 소진 — 일부만 분류됨")
+                    _state.update(message=msg)
                 break
+            print(f"[excel_classifier] {i}번째 분류 실패: {type(e).__name__}: {e}", flush=True)
             res = {"label_l2": "오류", "subject": "", "false_score": None,
                    "false_level": "미분류", "false_reason": f"{type(e).__name__}: {e}",
                    "department_name": None}

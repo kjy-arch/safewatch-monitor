@@ -3,10 +3,14 @@ from google import genai
 from google.genai import types
 from app.core.config import settings
 from app.core.database import supabase
+from app.core import progress
 from app.services.classifier_prompt import (
     SYSTEM_PROMPT, LABEL_SCORE_RANGES, PROMOTION_LABELS, ALL_LABELS, SUBJECTS,
 )
-from app.services.keyword_scorer import score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD
+from app.services.keyword_scorer import (
+    score_text, is_enabled as prefilter_enabled,
+    PREFILTER_THRESHOLD, NEWS_PREFILTER_THRESHOLD,
+)
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
@@ -21,10 +25,13 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
 
     progress_cb(done, total)가 주어지면 매 건 처리 시작 시 호출해 진행률을 보고한다.
     """
+    # 최신 저장분부터 분류 — 방금 수집한 기사가 오래된 미분류 백로그에 밀리지 않게.
+    # (백로그는 수동 '미분류 분류'(POST /api/crawl/analyze)로 따로 소진한다.)
     query = (
         supabase.table("crawled_articles")
         .select("id, title, content, source_type")
         .is_("false_score", "null")
+        .order("created_at", desc=True)
     )
     if _failed_ids:
         query = query.not_.in_("id", list(_failed_ids)[:_FAILED_IDS_MAX])
@@ -46,8 +53,11 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                   flush=True)
         try:
             text = f"{article.get('title') or ''} {article['content']}"
+            # 언론은 완화된 임계치 적용 — 키워드 점수가 아주 낮은 뉴스만 Gemini 없이 스킵
+            threshold = (NEWS_PREFILTER_THRESHOLD if article.get("source_type") == "언론"
+                         else PREFILTER_THRESHOLD)
             kw_score = score_text(text) if prefilter_enabled() else -1
-            if 0 <= kw_score < PREFILTER_THRESHOLD:
+            if 0 <= kw_score < threshold:
                 supabase.table("crawled_articles").update({
                     "false_score":  5,
                     "false_level":  "낮음",
@@ -57,6 +67,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                 }).eq("id", article["id"]).execute()
                 prefiltered += 1
                 analyzed += 1
+                progress.count_analyzed()
                 continue
 
             result = _analyze(article.get("title") or "", article["content"],
@@ -80,6 +91,8 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                 supabase.table("crawled_articles").update(update_fields).eq("id", article["id"]).execute()
 
             analyzed += 1
+            progress.count_analyzed()
+            progress.count_risk(result["false_level"])
         except Exception as e:
             if "RESOURCE_EXHAUSTED" in str(e):
                 print("[analyzer] Gemini 크레딧/쿼터 소진 — 배치 중단. "

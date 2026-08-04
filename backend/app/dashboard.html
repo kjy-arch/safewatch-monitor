@@ -89,6 +89,15 @@
   .res.mid  .chip.score { color: var(--warn); }
   .res.low  .chip.score { color: var(--ok); }
   .hidden { display: none; }
+  .srcpick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+  @media (max-width: 560px) { .srcpick { grid-template-columns: 1fr; } }
+  .srcpick .grp { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-weight: 600; margin: 8px 0 2px; }
+  .srcpick label { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+  .srcpick label.locked { color: var(--muted); cursor: default; }
+  .srcpick .tag { font-size: 11px; padding: 1px 7px; border-radius: 5px; background: var(--track); color: var(--muted); margin-left: auto; }
+  .srcpick .tag.g { background: var(--warn-bg); color: var(--warn); }
+  .warnbox { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; line-height: 1.5; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -112,6 +121,15 @@
     </div>
 
     <div class="card">
+      <div class="rowtop"><div>
+        <h2>수집 소스 선택</h2>
+        <p>안전 소스는 항상 포함 · 회색 소스는 선택할 때만 이번 실행에 수집됩니다.</p>
+      </div></div>
+      <div class="srcpick" id="srcpick"><p class="foot">불러오는 중…</p></div>
+      <div class="warnbox" id="grayWarn" style="display:none">⚠️ 회색지대 소스(스크래핑·비공식 접근)는 플랫폼 약관·법적 리스크가 있어 기관 법무·정보보안 검토가 필요합니다. 선택 시 이번 실행에만 포함되며 서버 로그에 감사 기록으로 남습니다.</div>
+    </div>
+
+    <div class="card">
       <div class="rowtop">
         <div>
           <h2>수동 수집 실행</h2>
@@ -122,17 +140,37 @@
       <div class="barlabel"><span id="phaseText">대기 중</span><span class="pct" id="pct">0%</span></div>
       <div class="track"><div class="fill" id="fill"></div></div>
       <div class="steps" id="steps"></div>
+      <p class="foot" id="dlNote">완료되면 결과 엑셀이 다운로드 폴더에 자동 저장됩니다 (서버가 직접 저장).</p>
+    </div>
+
+    <div class="card">
+      <div class="rowtop">
+        <div>
+          <h2>미분류 분류 <span id="backlogCnt" style="color:var(--warn)"></span></h2>
+          <p>수집 없이, 아직 분류되지 않은 기사만 AI로 분류합니다.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="anLimit" style="height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:14px">
+            <option value="50">50건</option>
+            <option value="100" selected>100건</option>
+            <option value="300">300건</option>
+            <option value="1000">전체</option>
+          </select>
+          <button id="anBtn" class="primary" onclick="startAnalyze()">분류 실행</button>
+        </div>
+      </div>
+      <p class="foot" id="anNote">⚠️ 분류 1건당 Gemini API가 호출됩니다(사전필터 통과분 제외). 배치 크기를 확인하고 실행하세요.</p>
     </div>
 
     <div class="grid">
       <div class="tile"><div class="k">이번 수집</div><div class="v" id="mCollected">0</div></div>
       <div class="tile"><div class="k">분류 완료</div><div class="v" id="mAnalyzed">0</div></div>
-      <div class="tile dang"><div class="k">위험 높음(누적)</div><div class="v" id="mHigh">0</div></div>
-      <div class="tile warn"><div class="k">위험 중간(누적)</div><div class="v" id="mMid">0</div></div>
+      <div class="tile dang"><div class="k">위험 높음</div><div class="v" id="mHigh">0</div></div>
+      <div class="tile warn"><div class="k">위험 중간</div><div class="v" id="mMid">0</div></div>
     </div>
 
     <div class="card">
-      <h3 class="sec">출처별 수집 (누적)</h3>
+      <h3 class="sec">출처별 수집 <span style="color:var(--muted);font-weight:400">· 이번 실행</span></h3>
       <div id="sources"><p class="foot">불러오는 중…</p></div>
     </div>
     <p class="foot" id="lastRun"></p>
@@ -148,6 +186,12 @@
           <div class="foot" style="margin:2px 0 8px">Monitor 수집 엑셀 또는 임의 엑셀 · '원문' 또는 '내용' 열이 있으면 됩니다.</div>
           <input type="file" id="xlfile" accept=".xlsx">
         </div>
+        <select id="clsLimit" style="height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:14px">
+          <option value="50">50건</option>
+          <option value="200" selected>200건</option>
+          <option value="500">500건</option>
+          <option value="5000">전체</option>
+        </select>
         <button id="clsBtn" class="primary" onclick="classifyExcel()">분류 실행</button>
       </div>
       <p class="foot" id="clsMsg"></p>
@@ -195,14 +239,29 @@ function badgeFor(s) {
   }
   return ["", "대기 중"];
 }
+/* 결과 엑셀은 서버가 직접 파일로 저장한다(브라우저 다운로드 설정과 무관).
+   저장 경로를 진행 카드 하단에 표시. */
+let lastFinished = null;
+function showExport(s) {
+  if (s.status !== "done") return;
+  // 실행이 끝난 순간에만 백로그 건수를 다시 조회 (매 폴링마다 count 쿼리하지 않게)
+  if (s.finished_at !== lastFinished) { lastFinished = s.finished_at; loadBacklog(); }
+  if (s.export_path)
+    $("dlNote").textContent = "✅ 결과 엑셀 저장됨: " + s.export_path;
+  else if (!(s.collected > 0))
+    $("dlNote").textContent = "수집 0건 — 엑셀 저장 생략";
+}
 async function pollStatus() {
   try {
     const s = await (await fetch("/api/crawl/status")).json();
+    showExport(s);
     const [cls, txt] = badgeFor(s);
     const b = $("badge"); b.className = "badge " + cls; b.textContent = txt;
     const running = s.status === "running";
     $("start").disabled = running;
     $("start").textContent = running ? "수집 중…" : "수동 수집 시작";
+    $("anBtn").disabled = running;   // 수집·분류 중엔 중복 실행 방지
+    $("anBtn").textContent = running ? "실행 중…" : "분류 실행";
     const pct = s.percent || 0;
     $("fill").style.width = pct + "%"; $("pct").textContent = pct + "%";
     let ptxt = "대기 중";
@@ -213,6 +272,8 @@ async function pollStatus() {
     $("phaseText").textContent = ptxt;
     $("mCollected").textContent = s.collected ?? 0;
     $("mAnalyzed").textContent = s.analyzed ?? 0;
+    $("mHigh").textContent = s.high ?? 0;   // 이번 실행분 (수집 시작 시 0으로 초기화)
+    $("mMid").textContent  = s.mid ?? 0;
     const done = s.status === "done";
     const mark = (active, ok) => ok ? "✓" : (active ? "●" : "○");
     const crawlOk = done || s.phase === "분류" || s.phase === "알림";
@@ -221,31 +282,83 @@ async function pollStatus() {
       `<span>${mark(s.phase==="크롤링", crawlOk)} 크롤링</span>` +
       `<span>${mark(s.phase==="분류", clsOk)} AI 분류</span>` +
       `<span>${mark(s.phase==="알림", done)} 알림 발송</span>`;
+    renderSources(s.by_source || {});   // 이번 실행 출처별 (크롤링 중 실시간 갱신)
     if (s.finished_at)
       $("lastRun").textContent = "최근 실행 완료: " + s.finished_at.replace("T"," ").slice(0,19)
         + (s.message ? " — " + s.message : "");
   } catch (e) {}
 }
-async function pollStats() {
+function renderSources(src) {
+  const entries = Object.entries(src).sort((a,b) => b[1]-a[1]);
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  $("sources").innerHTML = entries.length
+    ? entries.map(([k,v]) =>
+        `<div class="srcrow"><span class="name">${esc(k)}</span>` +
+        `<span class="mini"><i style="width:${Math.round(v/max*100)}%"></i></span>` +
+        `<span class="cnt">${v}</span></div>`).join("")
+    : '<p class="foot">수집을 시작하면 출처별 건수가 실시간으로 표시됩니다.</p>';
+}
+const TYPE_LABEL = {
+  naver_news:"네이버 뉴스", naver_blog:"네이버 블로그", naver_cafe:"네이버 카페",
+  naver_kin:"네이버 지식인", youtube:"유튜브", dcinside:"디시인사이드",
+  fmkorea:"에펨코리아", instagram:"인스타그램", x:"X", tiktok:"틱톡",
+};
+async function loadSources() {
+  let rows;
+  try { rows = await (await fetch("/api/crawl/sources")).json(); } catch (e) { return; }
+  const safe = rows.filter(r => r.tier === "safe");
+  const gray = rows.filter(r => r.tier === "gray");
+  const label = r => TYPE_LABEL[r.source_type] || r.name;
+  let html = "";
+  if (safe.length) {
+    html += `<div class="grp">안전 (항상 수집)</div>`;
+    html += safe.map(r =>
+      `<label class="locked"><input type="checkbox" data-id="${r.id}" checked disabled>${esc(label(r))}<span class="tag">안전</span></label>`
+    ).join("");
+  }
+  if (gray.length) {
+    html += `<div class="grp">회색 (선택 시 수집)</div>`;
+    html += gray.map(r => r.is_active
+      ? `<label><input type="checkbox" data-id="${r.id}" class="graychk">${esc(label(r))}<span class="tag g">회색</span></label>`
+      : `<label class="locked"><input type="checkbox" disabled>${esc(label(r))}<span class="tag">비활성·자격증명 필요</span></label>`
+    ).join("");
+  }
+  $("srcpick").innerHTML = html || '<p class="foot">등록된 소스가 없습니다.</p>';
+  $("grayWarn").style.display = gray.some(r => r.is_active) ? "block" : "none";
+}
+async function loadBacklog() {
   try {
-    const st = await (await fetch("/api/stats")).json();
-    const lvl = st.by_level || {};
-    $("mHigh").textContent = lvl["높음"] || 0;
-    $("mMid").textContent  = lvl["중간"] || 0;
-    const src = st.by_source || {};
-    const entries = Object.entries(src).filter(([k]) => k !== "-").sort((a,b) => b[1]-a[1]);
-    const max = Math.max(1, ...entries.map(e => e[1]));
-    $("sources").innerHTML = entries.length
-      ? entries.map(([k,v]) =>
-          `<div class="srcrow"><span class="name">${esc(k)}</span>` +
-          `<span class="mini"><i style="width:${Math.round(v/max*100)}%"></i></span>` +
-          `<span class="cnt">${v}</span></div>`).join("")
-      : '<p class="foot">아직 수집된 데이터가 없습니다.</p>';
+    const r = await (await fetch("/api/crawl/backlog")).json();
+    const n = r.unclassified ?? 0;
+    $("backlogCnt").textContent = n ? `· ${n.toLocaleString()}건 남음` : "· 없음";
+    $("anBtn").disabled = n === 0;
   } catch (e) {}
 }
+async function startAnalyze() {
+  const limit = $("anLimit").value;
+  if (!confirm(`미분류 기사를 최대 ${limit}건 분류합니다. Gemini API 비용이 발생합니다. 계속할까요?`)) return;
+  $("anBtn").disabled = true; $("anBtn").textContent = "시작 중…";
+  try {
+    const r = await (await fetch("/api/crawl/analyze", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ limit: Number(limit) }),
+    })).json();
+    $("anNote").textContent = r.message;
+  } catch (e) { $("anNote").textContent = "분류 시작 실패"; }
+  setTimeout(pollStatus, 500);
+}
 async function startCrawl() {
+  const ids = [...document.querySelectorAll("#srcpick input[type=checkbox]:checked")]
+    .map(el => el.dataset.id).filter(Boolean);
+  const graySel = [...document.querySelectorAll("#srcpick input.graychk:checked")].length;
+  if (graySel && !confirm(`회색지대 소스 ${graySel}개를 포함해 수집합니다. 계속할까요?`)) return;
   $("start").disabled = true; $("start").textContent = "시작 중…";
-  try { await fetch("/api/crawl/run", { method: "POST" }); } catch (e) {}
+  try {
+    await fetch("/api/crawl/run", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ source_ids: ids }),
+    });
+  } catch (e) {}
   setTimeout(pollStatus, 500);
 }
 
@@ -255,9 +368,11 @@ async function classifyExcel() {
   const f = $("xlfile").files[0];
   if (!f) { $("clsMsg").textContent = "먼저 엑셀 파일을 선택하세요."; return; }
   const fd = new FormData(); fd.append("file", f);
+  const limit = $("clsLimit").value;
   const btn = $("clsBtn"); btn.disabled = true; btn.textContent = "업로드 중…";
   try {
-    const r = await (await fetch("/api/classify/excel", { method: "POST", body: fd })).json();
+    const r = await (await fetch(`/api/classify/excel?limit=${limit}`,
+                                 { method: "POST", body: fd })).json();
     $("clsMsg").textContent = r.message + (r.total ? ` (${r.total}건)` : "");
     $("cTotal").textContent = r.total || 0;
   } catch (e) { $("clsMsg").textContent = "업로드 실패"; }
@@ -269,8 +384,13 @@ async function pollClassify() {
   const running = s.status === "running";
   const pct = s.percent || 0;
   $("clsFill").style.width = pct + "%"; $("clsPct").textContent = pct + "%";
+  // 중단(크레딧 소진 등)됐으면 '완료'로 보이지 않게 실제 처리 건수와 사유를 표시
+  const stopped = s.status === "done" && s.total && s.done < s.total;
   $("clsPhase").textContent = running ? `분류 중 · ${s.done}/${s.total}건`
-                          : (s.status === "done" ? "완료" : "대기 중");
+    : s.status !== "done" ? "대기 중"
+    : stopped ? `중단됨 · ${s.done}/${s.total}건 처리` : `완료 · ${s.done}건`;
+  if (s.status === "done" && s.message)
+    $("clsMsg").textContent = "⚠️ " + s.message;
   const btn = $("clsBtn"); btn.disabled = running; btn.textContent = running ? "분류 중…" : "분류 실행";
 
   const rs = (s.results || []).slice().sort((a,b) => (b.false_score||0) - (a.false_score||0));
@@ -295,9 +415,8 @@ async function pollClassify() {
   if (running) setTimeout(pollClassify, 1500);
 }
 
-pollStatus(); pollStats();
-setInterval(pollStatus, 1500);
-setInterval(pollStats, 5000);
+pollStatus(); loadSources(); loadBacklog();
+setInterval(pollStatus, 1500);   // 진행률·건수·출처별 모두 이번 실행 기준으로 갱신
 </script>
 </body>
 </html>

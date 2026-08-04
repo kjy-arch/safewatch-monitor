@@ -1,10 +1,10 @@
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Body
 from fastapi.responses import Response
-from app.core.scheduler import run_crawl_and_analyze
+from app.core.scheduler import run_crawl_and_analyze, run_analyze_only, tier_of
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import _build_excel
-from app.services import excel_classifier
+from app.services import excel_classifier, exporter
 from app.core.database import supabase
 from app.core import progress
 
@@ -13,12 +13,31 @@ router = APIRouter(tags=["crawl"])
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+@router.get("/crawl/sources")
+def crawl_sources_list():
+    """수집 소스 목록 + 위험 분류(safe/gray) — 대시보드 소스 선택용."""
+    rows = (
+        supabase.table("crawl_sources")
+        .select("id, name, source_type, is_active")
+        .order("source_type")
+        .execute()
+        .data
+    )
+    for r in rows:
+        r["tier"] = tier_of(r["source_type"])
+    return rows
+
+
 @router.post("/crawl/run")
-def manual_crawl(background_tasks: BackgroundTasks):
-    """수동으로 전체 크롤링 + 분류 실행 (주말·공휴일에도 강제 실행)."""
+def manual_crawl(background_tasks: BackgroundTasks, body: dict = Body(default=None)):
+    """수동 크롤링 + 분류 실행.
+
+    body.source_ids가 주어지면 그 소스만, 없으면 안전 소스만 수집(회색은 명시 선택 필요).
+    """
     if progress.is_running():
         return {"message": "이미 수집이 진행 중입니다."}
-    background_tasks.add_task(run_crawl_and_analyze, True)
+    source_ids = (body or {}).get("source_ids")
+    background_tasks.add_task(run_crawl_and_analyze, True, source_ids)
     return {"message": "크롤링 시작됨. 잠시 후 결과를 확인하세요."}
 
 
@@ -31,16 +50,7 @@ def crawl_status():
 @router.get("/articles/export")
 def export_articles(scope: str = "today", false_level: str = None):
     """수집 결과를 엑셀(.xlsx)로 다운로드. scope=today(오늘) | all(전체)."""
-    query = supabase.table("crawled_articles").select("*, departments(name)")
-
-    if scope == "today":
-        now_kst = datetime.now(timezone(timedelta(hours=9)))
-        today_start = now_kst.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-        query = query.gte("created_at", today_start.isoformat())
-    if false_level:
-        query = query.eq("false_level", false_level)
-
-    articles = query.order("false_score", desc=True).limit(5000).execute().data
+    articles = exporter.fetch_articles(scope, false_level)
     xlsx = _build_excel(articles)
 
     stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
@@ -105,11 +115,30 @@ def classify_export():
     )
 
 
+@router.get("/crawl/backlog")
+def crawl_backlog():
+    """미분류(백로그) 건수 — 대시보드 표시용."""
+    n = (
+        supabase.table("crawled_articles")
+        .select("id", count="exact")
+        .is_("false_score", "null")
+        .execute()
+        .count
+    )
+    return {"unclassified": n}
+
+
 @router.post("/crawl/analyze")
-def manual_analyze(background_tasks: BackgroundTasks):
-    """미분류 기사만 AI 분류 실행."""
-    background_tasks.add_task(analyze_unclassified, 30)
-    return {"message": "AI 분류 시작됨."}
+def manual_analyze(background_tasks: BackgroundTasks, body: dict = Body(default=None)):
+    """미분류 백로그를 AI 분류. body.limit로 이번 배치 건수 지정(기본 100)."""
+    if progress.is_running():
+        return {"message": "이미 실행 중입니다."}
+    try:
+        limit = max(1, int((body or {}).get("limit") or 100))
+    except (TypeError, ValueError):
+        limit = 100
+    background_tasks.add_task(run_analyze_only, limit)
+    return {"message": f"미분류 분류 시작 (최대 {limit}건)"}
 
 
 @router.get("/articles")
