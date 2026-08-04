@@ -18,6 +18,33 @@
 | DB | Supabase (kjy-arch/safewatch-classifier와 동일 프로젝트) |
 | 실행 | 바탕화면 아이콘 → `backend/run_monitor.bat` → http://localhost:8001 |
 
+### 설치 절차 (PC마다 최초 1회)
+
+`backend/setup.bat` 실행 — 가상환경 → 의존성 → **키워드 점수 사전** 순으로 진행한다.
+
+1. `python -m venv .venv`
+2. `pip install -r requirements.txt`
+3. **`build_keyword_scores.py`** — 사전 필터용 점수 사전 생성
+4. `backend/.env`에 Supabase·Gemini 키 입력
+5. Supabase SQL Editor에서 `backend/database/migrations/*.sql` 실행
+
+> ⚠️ **3번을 건너뛰면 사전 필터가 조용히 꺼진 채로 동작한다.**
+> `app/data/keyword_scores.json`은 병무청 학습자료 파생물이라 `.gitignore` 대상이므로
+> git으로 받은 PC에는 존재하지 않는다. 없으면 **모든 글이 Gemini로 가서 API 비용이 급증**한다.
+> 원본 `키워드.xlsx`는 PC마다 위치가 다르므로 아래 중 하나로 지정한다:
+> ```
+> build_keyword_scores.py --xlsx "경로\키워드.xlsx"
+> set KEYWORD_XLSX=경로\키워드.xlsx
+> ```
+> **확인 방법**: `GET /api/health` → `prefilter.enabled`가 `true`인지 본다.
+> `false`면 같은 응답의 `prefilter.warning`에 조치 방법이 들어 있다.
+
+### 학습자료 갱신
+`키워드.xlsx`가 새로 나오면 그 파일로 `build_keyword_scores.py`를 다시 돌리면 된다
+(같은 원본이면 결과도 동일 — 재현 가능). 단 사전이 바뀌면 임계치 근거가 달라지므로
+`validate_prefilter.py`로 재검증할 것. 은어 고정 가중치(`HIGH_SIGNAL`)는 스크립트 안에
+하드코딩되어 있어 **신규 은어 추가는 코드 수정이 필요하다.**
+
 ---
 
 ## 2. 기술 스택
