@@ -82,9 +82,12 @@ class FakeQuery:
 
 def fake_analyze(title, text, source_type, departments):
     captured["gemini_calls"].append(title)
+    # Phase 2 통합 축 — unified_prompt.parse_unified가 돌려주는 형태와 같아야 한다
     return {"label_l1": "조장정보", "label_l2": "의도의심", "subject": "정신과",
+            "category": "편법·속임수·공정성 훼손", "action_type": "삭제대상",
+            "intent_type": "악의적 유포", "content_type": "과장/왜곡",
             "false_score": 40, "false_level": "중간", "false_reason": "r",
-            "department_name": None}
+            "department_names": []}
 
 
 analyzer.supabase = SimpleNamespace(table=lambda n: FakeQuery(n))

@@ -115,7 +115,7 @@ def run(rows: list[dict], limit: int = 200) -> None:
             if 0 <= kw_score < threshold:
                 res = {"label_l2": "단순내용", "subject": "기타", "false_score": 5,
                        "false_level": "낮음", "false_reason": f"키워드 사전필터 (점수 {kw_score})",
-                       "department_name": None}
+                       "department_names": []}
             else:
                 res = _analyze(title, text, r.get("source") or "", departments)
         except Exception as e:
@@ -129,14 +129,18 @@ def run(rows: list[dict], limit: int = 200) -> None:
             print(f"[excel_classifier] {i}번째 분류 실패: {type(e).__name__}: {e}", flush=True)
             res = {"label_l2": "오류", "subject": "", "false_score": None,
                    "false_level": "미분류", "false_reason": f"{type(e).__name__}: {e}",
-                   "department_name": None}
+                   "department_names": []}
+
+        # 통합 분석기는 부서를 관련도 순 배열(department_names)로 준다 — 1순위만 표시
+        dept = (res.get("department_names") or [None])[0]
 
         with _lock:
             _results.append({
                 "text": text[:300], "url": r.get("url") or "", "source": r.get("source") or "",
+                "department_name": dept,
                 **{k: res.get(k) for k in
                    ("false_score", "false_level", "label_l2", "subject",
-                    "false_reason", "department_name")},
+                    "false_reason")},
             })
             _state["done"] = i
 

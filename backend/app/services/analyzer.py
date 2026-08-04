@@ -4,9 +4,8 @@ from google.genai import types
 from app.core.config import settings
 from app.core.database import supabase
 from app.core import progress
-from app.services.classifier_prompt import (
-    SYSTEM_PROMPT, LABEL_SCORE_RANGES, PROMOTION_LABELS, ALL_LABELS, SUBJECTS,
-)
+# Phase 2 — 수집분/업로드분이 같은 프롬프트·파서를 쓴다 (app/services/unified_prompt.py)
+from app.services.unified_prompt import SYSTEM_PROMPT, parse_unified
 from app.services.keyword_scorer import (
     score_text, is_enabled as prefilter_enabled,
     PREFILTER_THRESHOLD, NEWS_PREFILTER_THRESHOLD,
@@ -64,6 +63,11 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                     "false_reason": f"키워드 사전필터 자동분류 (점수 {kw_score})",
                     "label_l2":     "단순내용",
                     "subject":      "기타",
+                    # 축 B도 함께 채워야 통합 집계에서 빈칸으로 남지 않는다
+                    "category":     "해당없음",
+                    "action_type":  "비대상",
+                    "intent_type":  "불명확",
+                    "content_type": "문제없음",
                 }).eq("id", article["id"]).execute()
                 prefiltered += 1
                 analyzed += 1
@@ -72,7 +76,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
 
             result = _analyze(article.get("title") or "", article["content"],
                               article["source_type"], departments)
-            dept_id = _find_dept(result.get("department_name"), departments)
+            dept_ids = _find_depts(result.get("department_names"), departments)
 
             update_fields = {
                 "false_score":  result["false_score"],
@@ -80,14 +84,21 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                 "false_reason": result["false_reason"],
                 "label_l2":     result["label_l2"],
                 "subject":      result["subject"],
-                "department_id": dept_id,
+                # 축 B (가이드라인) — Phase 2에서 추가된 컬럼
+                "category":     result["category"],
+                "action_type":  result["action_type"],
+                "intent_type":  result["intent_type"],
+                "content_type": result["content_type"],
+                "department_id":   dept_ids[0] if dept_ids else None,
+                "department_id_2": dept_ids[1] if len(dept_ids) > 1 else None,
             }
             try:
                 supabase.table("crawled_articles").update(update_fields).eq("id", article["id"]).execute()
             except Exception:
-                # label_l2/subject 컬럼 미적용(002 마이그레이션 전)이어도 분류 자체는 저장
-                update_fields.pop("label_l2", None)
-                update_fields.pop("subject", None)
+                # 확장 컬럼 미적용(002·006 마이그레이션 전)이어도 분류 자체는 저장
+                for f in ("label_l2", "subject", "category", "action_type",
+                          "intent_type", "content_type", "department_id_2"):
+                    update_fields.pop(f, None)
                 supabase.table("crawled_articles").update(update_fields).eq("id", article["id"]).execute()
 
             analyzed += 1
@@ -110,13 +121,18 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
     return analyzed
 
 
-def _find_dept(name, departments):
-    if not name:
-        return None
-    for d in departments:
-        if d["name"] == name or name in d["name"]:
-            return d["id"]
-    return None
+def _find_depts(names, departments) -> list:
+    """AI가 관련도 순으로 준 부서명들을 ID로 매핑 (최대 2개, 중복 제거)."""
+    ids = []
+    for name in (names or []):
+        for d in departments:
+            if d["name"] == name or name in d["name"]:
+                if d["id"] not in ids:
+                    ids.append(d["id"])
+                break
+        if len(ids) == 2:
+            break
+    return ids
 
 
 def _analyze(title: str, text: str, source_type: str, departments: list) -> dict:
@@ -150,38 +166,11 @@ def _analyze(title: str, text: str, source_type: str, departments: list) -> dict
 
 
 def _parse_response(raw: str) -> dict:
-    """Gemini 응답 JSON을 검증·보정해 저장용 dict로 변환."""
+    """Gemini 응답 JSON을 검증·보정해 저장용 dict로 변환 (두 축 공통 파서 사용)."""
     raw = raw.strip()
     if raw.startswith("```"):  # JSON 모드 실패 대비 안전망
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
 
-    data = json.loads(raw.strip())
-
-    label = str(data.get("label_l2", "")).strip()
-    if label not in ALL_LABELS:
-        label = "단순내용"
-
-    # 점수: 라벨별 허용 구간으로 보정 (모델이 구간 밖 점수를 주면 구간에 클램프)
-    lo, hi = LABEL_SCORE_RANGES[label]
-    try:
-        score = int(data.get("false_score", lo))
-    except (TypeError, ValueError):
-        score = lo
-    score = max(lo, min(hi, score))
-    level = "낮음" if score <= 33 else ("중간" if score <= 66 else "높음")
-
-    subject = str(data.get("subject", "")).strip()
-    if subject not in SUBJECTS:
-        subject = "기타"
-
-    return {
-        "label_l1":        "조장정보" if label in PROMOTION_LABELS else "단순병역정보",
-        "label_l2":        label,
-        "subject":         subject,
-        "false_score":     score,
-        "false_level":     level,
-        "false_reason":    str(data.get("reason", data.get("false_reason", "")))[:100],
-        "department_name": data.get("department_name"),
-    }
+    return parse_unified(json.loads(raw.strip()))
