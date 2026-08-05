@@ -8,3 +8,6 @@ dist/
 *.log
 eval_result_*.csv
 backend/app/data/keyword_scores.json
+
+# 기관 보고서 원고 — 저장소가 공개(public)이므로 커밋 금지
+보고서용 폴더/
