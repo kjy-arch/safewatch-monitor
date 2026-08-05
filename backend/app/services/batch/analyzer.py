@@ -9,6 +9,7 @@ from app.core.database import supabase
 from app.services.batch.doc_service import find_relevant_docs
 # Phase 2 — 수집분/업로드분이 같은 프롬프트·파서를 쓰도록 통합
 from app.services.unified_prompt import SYSTEM_PROMPT, parse_unified
+from app.services.keyword_scorer import has_military_context
 
 PARALLEL_WORKERS = 5           # 동시 Gemini API 호출 수 (10에서 축소 — Windows httpx 동시연결 폭주 시 WinError 10035 완화)
 SUPABASE_PAGE_SIZE = 1000      # Supabase 페이지당 조회 건수
@@ -29,12 +30,14 @@ HANGUL_RE = re.compile(r"[가-힣]")
 def prefilter(text: str) -> dict | None:
     """Gemini 호출 없이 확정 가능한 '비대상'을 로컬에서 판정. 판정 불가면 None.
 
-    한글이 한 글자도 없는 내용(번호·날짜·기호·자모만 등)은 병역 관련 정보가 될 수 없어
-    AI가 항상 '병무청 무관'으로 답한다. 이런 행은 API 호출을 낭비하므로 즉시 확정한다.
-    한글이 있으면 짧더라도 AI에 보낸다("군대 빼는법 없나" 같은 짧은 조장정보 보호).
+    두 가지를 로컬에서 확정한다.
+      ① 한글이 한 글자도 없는 내용(번호·날짜·기호·자모만 등)
+      ② 병역 관련 단어가 하나도 없는 내용 — 수집분과 같은 게이트
+         (실측 676건에서 무관 글이 32%였고 그만큼 호출이 낭비됐다)
+    한글·병역어가 있으면 짧더라도 AI에 보낸다("군대 빼는법 없나" 같은 짧은 조장정보 보호).
     """
     t = (text or "").strip()
-    if t and HANGUL_RE.search(t):
+    if t and HANGUL_RE.search(t) and has_military_context(t):
         return None
     return {
         "false_score":      0,

@@ -27,7 +27,9 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-ROWS = [{"id": "x1", "title": "t", "content": "c", "source_type": "커뮤니티"}]
+# 병역 관련성 게이트를 통과해야 _analyze까지 도달한다(게이트는 test_prefilter가 검증)
+ROWS = [{"id": "x1", "title": "군면제 문의", "content": "신검 4급 받는법 알려주셈",
+         "source_type": "커뮤니티"}]
 
 
 class FakeNot:
