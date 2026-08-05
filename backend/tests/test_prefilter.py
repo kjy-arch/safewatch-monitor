@@ -28,10 +28,29 @@ print("[1] keyword_scorer")
 scorer._scores = {"공익": 4, "면제": 4, "정공": 8}
 scorer._load_attempted = True
 
+# ── 병역 관련성 게이트 ──
+# 실수집 676건 중 32%가 병무 무관(육아·운세·잡담)이라 호출이 그대로 낭비됐다.
+print("[0] has_military_context")
+for t in ["군대 안가는 방법 아는사람", "신검 4급 받고싶다", "예비군 훈련 언제임",
+          "군생활 힘들었다", "전역하고 뭐하지", "정공 4급"]:
+    check(f"병역 글 통과: {t[:14]}", scorer.has_military_context(t))
+for t in ["초6여아 갈수록 키가안자라는데 문제일까요?", "2026년 8월 5일 띠별운세",
+          "오늘 점심 뭐 먹지", "14년생 뼈나이 판독 부탁드려요"]:
+    check(f"무관 글 차단: {t[:14]}", not scorer.has_military_context(t))
+check("빈 문자열은 무관", not scorer.has_military_context(""))
+check("None도 안전", not scorer.has_military_context(None))
+
+
 check("매칭 합산", scorer.score_text("정공으로 공익 갈까") == 12)
 check("무관 텍스트 0점", scorer.score_text("오늘 점심 뭐 먹지") == 0)
 check("skip: 0점 < 임계치", scorer.should_skip("오늘 점심 뭐 먹지") is True)
-check("no-skip: 임계치 이상", scorer.should_skip("공익 가능?") is False)
+# 임계치는 실측에 따라 조정되므로(2 → 5, 2026-08-05) 고정값이 아니라 상대적으로 검증한다
+below = "공익 가능?"                     # 4점
+above = "정공으로 공익 면제 노린다"        # 16점
+check("skip 판정은 임계치 기준",
+      scorer.should_skip(below) is (scorer.score_text(below) < scorer.PREFILTER_THRESHOLD))
+check("no-skip: 임계치 이상", scorer.should_skip(above) is False,
+      f"점수 {scorer.score_text(above)} / 임계치 {scorer.PREFILTER_THRESHOLD}")
 
 scorer._scores = None
 check("사전 없으면 -1", scorer.score_text("공익") == -1)
@@ -101,7 +120,10 @@ check("무관 글은 Gemini 미호출", captured["gemini_calls"] == ["정공 가
       f"got {captured['gemini_calls']}")
 junk = captured["updates"].get("junk", {})
 check("무관 글 자동분류: 단순내용", junk.get("label_l2") == "단순내용", f"got {junk}")
-check("무관 글 점수 5", junk.get("false_score") == 5)
+# 무관 글은 병역 게이트가 먼저 잡는다 → 점수 0 + 사유에 근거 표시
+check("무관 글 점수 0", junk.get("false_score") == 0, f"got {junk.get('false_score')}")
+check("무관 글 사유에 근거", "병역 관련 단어 없음" in (junk.get("false_reason") or ""),
+      f"got {junk.get('false_reason')}")
 hot = captured["updates"].get("hot", {})
 check("병역 글은 Gemini 결과로 저장", hot.get("label_l2") == "의도의심", f"got {hot}")
 

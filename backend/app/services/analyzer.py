@@ -8,6 +8,7 @@ from app.core import progress
 from app.services.unified_prompt import SYSTEM_PROMPT, parse_unified
 from app.services.keyword_scorer import (
     score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD,
+    has_military_context,
 )
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
@@ -51,13 +52,21 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                   flush=True)
         try:
             text = f"{article.get('title') or ''} {article['content']}"
-            # 출처와 무관하게 동일 임계치 (요구 Q7) — keyword_scorer 주석 참조
+
+            # ① 병역 관련성 게이트 — 병역 단어가 하나도 없으면 Gemini에 보내지 않는다.
+            #    글은 그대로 저장해 두므로(삭제 아님) 검수 화면에서 되돌릴 수 있고,
+            #    false_reason으로 이 규칙이 처리한 건수를 사후 추적할 수 있다.
+            # ② 관련은 있으나 키워드 점수가 임계치 미만이면 사전필터로 자동분류.
+            #    ①·②는 출처와 무관하게 동일 적용 (요구 Q7).
             kw_score = score_text(text) if prefilter_enabled() else -1
-            if 0 <= kw_score < PREFILTER_THRESHOLD:
+            off_topic = not has_military_context(text)
+            if off_topic or 0 <= kw_score < PREFILTER_THRESHOLD:
+                reason = ("병역 관련 단어 없음(자동판정)" if off_topic
+                          else f"키워드 사전필터 자동분류 (점수 {kw_score})")
                 supabase.table("crawled_articles").update({
-                    "false_score":  5,
+                    "false_score":  0 if off_topic else 5,
                     "false_level":  "낮음",
-                    "false_reason": f"키워드 사전필터 자동분류 (점수 {kw_score})",
+                    "false_reason": reason,
                     "label_l2":     "단순내용",
                     "subject":      "기타",
                     # 축 B도 함께 채워야 통합 집계에서 빈칸으로 남지 않는다

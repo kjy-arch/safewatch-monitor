@@ -18,18 +18,24 @@ from app.core.database import supabase
 LEVEL_COLORS = {"높음": "FFCCCC", "중간": "FFF2CC", "낮음": "CCFFCC"}
 
 COLUMNS = [
-    ("번호",     5),
-    ("출처",     8),
-    ("게시일",   14),
-    ("거짓점수", 9),
-    ("거짓척도", 8),
-    ("내용구분", 12),
-    ("과목",     10),
-    ("판단이유", 30),
-    ("소관부서", 14),
-    ("원문",     50),
-    ("링크",     30),
-    ("대응상태", 10),
+    ("번호",       5),
+    ("출처",       8),
+    ("게시일",     14),
+    ("거짓점수",   9),
+    ("거짓척도",   8),
+    ("내용구분",   12),
+    ("과목",       10),
+    ("분류구분",   18),   # 가이드라인 삭제기준 (006)
+    ("조치유형",   10),   # 삭제대상/비대상/종합판단 (006)
+    ("의도유형",   10),
+    ("내용유형",   10),
+    ("판단이유",   30),
+    ("소관부서",   14),
+    ("소관부서2",  14),   # 복수 부서 매칭 (요구 Q4)
+    ("제목",       30),   # 요구 R2가 명시한 항목 — 그동안 누락돼 있었다
+    ("원문",       50),
+    ("링크",       30),
+    ("대응상태",   10),
 ]
 
 
@@ -39,7 +45,7 @@ def _build_excel(articles: list) -> bytes:
     ws.title = "수집결과"
 
     today_str = datetime.now(timezone(timedelta(hours=9))).strftime("%Y년 %m월 %d일")
-    ws.merge_cells("A1:L1")
+    ws.merge_cells("A1:R1")
     title_cell = ws["A1"]
     title_cell.value = f"SafeWatch Monitor 수집 결과 — {today_str}"
     title_cell.font = Font(bold=True, size=13, color="FFFFFF")
@@ -62,7 +68,11 @@ def _build_excel(articles: list) -> bytes:
 
     # 데이터
     for row_num, a in enumerate(articles, start=3):
-        dept = (a.get("departments") or {}).get("name", "") if isinstance(a.get("departments"), dict) else ""
+        def _dname(key):
+            v = a.get(key)
+            return v.get("name", "") if isinstance(v, dict) else ""
+        dept  = _dname("dept1") or _dname("departments")
+        dept2 = _dname("dept2")
         pub  = a.get("published_at", "")[:16].replace("T", " ") if a.get("published_at") else ""
         level = a.get("false_level") or "미분류"
         bg    = LEVEL_COLORS.get(level, "FFFFFF")
@@ -75,9 +85,15 @@ def _build_excel(articles: list) -> bytes:
             level,
             a.get("label_l2") or "",
             a.get("subject") or "",
+            a.get("category") or "",
+            a.get("action_type") or "",
+            a.get("intent_type") or "",
+            a.get("content_type") or "",
             a.get("false_reason", ""),
             dept,
-            (a.get("content") or a.get("title") or "")[:200],
+            dept2,
+            (a.get("title") or "")[:200],
+            (a.get("content") or "")[:1000],
             a.get("url", ""),
             a.get("response_status", "미확인"),
         ]
@@ -201,7 +217,7 @@ def send_alerts():
 
     articles = (
         supabase.table("crawled_articles")
-        .select("*, departments(name)")
+        .select("*, dept1:departments!crawled_articles_department_id_fkey(name),dept2:departments!crawled_articles_department_id_2_fkey(name)")
         .gte("created_at", today_start.isoformat())
         .order("false_score", desc=True)
         .execute()

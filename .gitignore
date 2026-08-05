@@ -9,3 +9,8 @@ dist/
 eval_result_*.csv
 keyword_baseline.json
 backend/app/data/keyword_scores.json
+
+# 초기 실험용 스크립트 (운영 경로 미사용, 커밋 대상 아님)
+backend/check_dates.py
+backend/test_full.py
+migrations.code-workspace

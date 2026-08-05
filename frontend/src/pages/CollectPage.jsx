@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import {
   getCrawlSources, runCrawl, getCrawlStatus, getBacklog, runAnalyzeBacklog,
+  articlesExportUrl,
 } from '../api'
 
 /* 수집 화면 — 기존 대시보드(dashboard.html)의 기능을 옮겨온 것.
@@ -15,6 +16,8 @@ export default function CollectPage() {
   const [backlog, setBacklog] = useState(null)
   const [limit, setLimit] = useState(100)
   const [msg, setMsg] = useState('')
+  const [scope, setScope] = useState('today')
+  const [level, setLevel] = useState('')
   const timer = useRef(null)
 
   useEffect(() => {
@@ -123,6 +126,38 @@ export default function CollectPage() {
         {status?.export_path && (
           <p className="text-xs text-green-700 mt-1">결과 엑셀 저장: {status.export_path}</p>
         )}
+      </section>
+
+      {/* 결과 엑셀 */}
+      <section className="bg-white rounded-lg shadow p-5">
+        <h2 className="font-bold mb-1">결과 엑셀 다운로드</h2>
+        <p className="text-xs text-gray-500 mb-3">
+          수집이 끝나면 서버가 자동으로 다운로드 폴더에도 저장합니다. 아래는 조건을 골라 직접 받는 용도입니다.
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs text-gray-500">
+            <div className="mb-1">범위</div>
+            <select value={scope} onChange={e => setScope(e.target.value)}
+              className="border rounded px-2 py-1.5 text-sm text-gray-800">
+              <option value="today">오늘 수집분</option>
+              <option value="all">전체</option>
+            </select>
+          </label>
+          <label className="text-xs text-gray-500">
+            <div className="mb-1">거짓척도</div>
+            <select value={level} onChange={e => setLevel(e.target.value)}
+              className="border rounded px-2 py-1.5 text-sm text-gray-800">
+              <option value="">전체</option>
+              <option value="높음">높음만</option>
+              <option value="중간">중간만</option>
+              <option value="낮음">낮음만</option>
+            </select>
+          </label>
+          <a href={articlesExportUrl({ scope, false_level: level })}
+            className="bg-green-600 text-white px-4 py-2 rounded text-sm">
+            엑셀 다운로드
+          </a>
+        </div>
       </section>
 
       {/* 출처별 (이번 실행) */}

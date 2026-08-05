@@ -98,7 +98,7 @@ def list_articles(
     query = supabase.table("crawled_articles").select(
         "id, title, content, url, source_type, false_score, false_level, "
         "false_reason, label_l2, subject, response_status, "
-        "published_at, created_at, departments(name)"
+        "published_at, created_at, dept1:departments!crawled_articles_department_id_fkey(name),dept2:departments!crawled_articles_department_id_2_fkey(name)"
     ).order("created_at", desc=True).limit(limit)
 
     if false_level:
