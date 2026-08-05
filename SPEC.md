@@ -315,8 +315,9 @@ frontend/                      React 19 + Vite + Tailwind
 docs/요구사항_대조.md          사이버조사과 요구 20건 ↔ 구현 대조
 ```
 
-> `backend/compare_keyword_effect.py` · `eval_exclude_pilot.py` · `run_classify.py`는
-> 초기 실험용 스크립트로, 현재 운영 경로에서는 쓰이지 않는다(정리 여부 미결).
+> 초기 실험용 스크립트(`compare_keyword_effect.py` · `eval_exclude_pilot.py` ·
+> `run_classify.py`)는 2026-08-05에 삭제했다. 백로그 소진은 `/api/crawl/analyze`가,
+> 키워드 효과 측정은 재수집분 실측이 대신한다.
 
 ## 9. 개발 단계
 
