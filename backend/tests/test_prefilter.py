@@ -31,7 +31,13 @@ scorer._load_attempted = True
 check("매칭 합산", scorer.score_text("정공으로 공익 갈까") == 12)
 check("무관 텍스트 0점", scorer.score_text("오늘 점심 뭐 먹지") == 0)
 check("skip: 0점 < 임계치", scorer.should_skip("오늘 점심 뭐 먹지") is True)
-check("no-skip: 임계치 이상", scorer.should_skip("공익 가능?") is False)
+# 임계치는 실측에 따라 조정되므로(2 → 5, 2026-08-05) 고정값이 아니라 상대적으로 검증한다
+below = "공익 가능?"                     # 4점
+above = "정공으로 공익 면제 노린다"        # 16점
+check("skip 판정은 임계치 기준",
+      scorer.should_skip(below) is (scorer.score_text(below) < scorer.PREFILTER_THRESHOLD))
+check("no-skip: 임계치 이상", scorer.should_skip(above) is False,
+      f"점수 {scorer.score_text(above)} / 임계치 {scorer.PREFILTER_THRESHOLD}")
 
 scorer._scores = None
 check("사전 없으면 -1", scorer.score_text("공익") == -1)
