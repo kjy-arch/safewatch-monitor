@@ -146,6 +146,13 @@
 `error_reason`으로 실패분만 재분석할 수 있다. Phase 2에서 `label_l2`·`subject`가 추가돼
 수집분과 같은 필드를 갖는다.
 
+### reclassify_logs (재분류 이력 — 008)
+담당자가 AI 판정을 바꾸면 **바뀐 필드마다 1행**을 남긴다.
+`target_table`/`target_id` · `field` · `old_value` · `new_value` · `reason`(필수) ·
+담당자·계정·PC명 · `created_at`.
+재분류 가능 항목은 코드의 화이트리스트(`services/review.py` `EDITABLE`)로 제한되며,
+목록 밖 컬럼·허용값 밖 값은 거부된다.
+
 ### run_logs (실행 이력 — 007)
 `run_type`(crawl/analyze/batch) · `operator_name` · `os_account` · `host_name` ·
 `status` · `collected` · `analyzed` · `started_at`/`finished_at` · `message`.
@@ -174,6 +181,7 @@
 | 005_sns_sources.sql | 인스타 · X · 틱톡 추가 (is_active=false) |
 | 006_unified_classification.sql | 분류 축 통합 — 수집분에 축 B 컬럼 + `department_id_2`, 업로드분에 축 A 컬럼 |
 | 007_run_logs.sql | 실행 이력 테이블 |
+| 008_review.sql | 검수·재분류 이력 + 업로드분 대응상태 |
 
 ---
 
@@ -208,13 +216,19 @@
 | GET/POST/PUT/DELETE | /api/departments | 부서·키워드 CRUD |
 | GET/PUT | /api/settings | 위험 임계값 |
 | GET/POST/DELETE | /api/docs | RAG 공식문서 |
+| **검수** | | |
+| GET | /api/review/queue | 검수 대상 (수집분+업로드분, 위험도순) |
+| GET | /api/review/fields | 재분류 가능 항목·허용값 |
+| PATCH | /api/review/{table}/{id} | 재분류 + 이력 기록. body `{changes, reason}` |
+| GET | /api/review/history | 전체 재분류 이력 |
+| GET | /api/review/{table}/{id}/history | 항목별 재분류 이력 |
 | **이력** | | |
 | GET/PUT | /api/operator | 담당자 조회·설정 |
 | GET | /api/runs | 최근 실행 이력 |
 | GET | /api/runs/active | 실행 중 작업 |
 
 ### 미구현
-`GET /api/articles/{id}` 상세 · `/api/sources` CRUD · `/api/alerts` CRUD · 검수/재분류(Phase 6 예정)
+`GET /api/articles/{id}` 상세 · `/api/sources` CRUD · `/api/alerts` CRUD
 
 ---
 
@@ -229,6 +243,7 @@ Phase 5에서 모니터 대시보드와 분류자 React를 하나로 합쳤다. 
 | **분석하기** | 엑셀 업로드 → 분석 시작 (결과는 DB 저장) | R2 |
 | **결과 목록** | 지난 배치 열람 — 다른 담당자가 올린 것도 보임 | Q2 |
 | **보고서** | 분기 집계 미리보기 + 엑셀 다운로드 (수집분+업로드분 통합) | Q5·R10·R5 |
+| **검수/선정** | AI 판정 재분류(사유 필수) + 이력, 대응상태로 삭제 요청 대상 선정 | **Q3**·Q1 |
 | **실행 이력** | 누가·언제·몇 건 (담당자·계정·PC명) | Q1 |
 | **관리자** | 부서·키워드 CRUD, 위험 임계값, 공식문서 | R1·R6·Q8 |
 

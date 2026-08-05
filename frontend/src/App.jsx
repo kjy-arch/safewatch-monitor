@@ -3,6 +3,7 @@ import CollectPage from './pages/CollectPage'
 import UploadPage from './pages/UploadPage'
 import BatchListPage from './pages/BatchListPage'
 import BatchDetailPage from './pages/BatchDetailPage'
+import ReviewPage from './pages/ReviewPage'
 import ReportPage from './pages/ReportPage'
 import RunsPage from './pages/RunsPage'
 import AdminPage from './pages/AdminPage'
@@ -12,6 +13,7 @@ const NAV = [
   { id: 'collect', label: '수집' },
   { id: 'upload', label: '분석하기' },
   { id: 'batches', label: '결과 목록' },
+  { id: 'review', label: '검수/선정' },
   { id: 'report', label: '보고서' },
   { id: 'runs', label: '실행 이력' },
   { id: 'admin', label: '관리자' },
@@ -77,6 +79,7 @@ export default function App() {
         {page === 'batch-detail' && (
           <BatchDetailPage batchId={selectedBatchId} onBack={() => setPage('batches')} />
         )}
+        {page === 'review' && <ReviewPage />}
         {page === 'report' && <ReportPage />}
         {page === 'runs' && <RunsPage />}
         {page === 'admin' && <AdminPage />}

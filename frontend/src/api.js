@@ -180,3 +180,35 @@ export function quarterlyDownloadUrl(from, to) {
   if (to) qs.set('to', to)
   return `${BASE}/reports/quarterly/download${qs.toString() ? '?' + qs : ''}`
 }
+
+/* ===== 검수·재분류 (Phase 6) ===== */
+
+export async function getReviewQueue({ action_type, response_status, limit = 100 } = {}) {
+  const qs = new URLSearchParams()
+  if (action_type) qs.set('action_type', action_type)
+  if (response_status) qs.set('response_status', response_status)
+  qs.set('limit', limit)
+  const res = await fetch(`${BASE}/review/queue?${qs}`)
+  return res.json()
+}
+
+export async function getEditableFields() {
+  const res = await fetch(`${BASE}/review/fields`)
+  return res.json()
+}
+
+export async function reclassify(table, id, changes, reason) {
+  const res = await fetch(`${BASE}/review/${table}/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ changes, reason }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || '재분류 실패')
+  return data
+}
+
+export async function getItemHistory(table, id) {
+  const res = await fetch(`${BASE}/review/${table}/${id}/history`)
+  return res.json()
+}
