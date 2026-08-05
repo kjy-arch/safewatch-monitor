@@ -138,13 +138,16 @@ def _pivot(df, index_col: str, column_col: str):
 
 
 def build_quarterly_excel(articles: List[Dict], dept_map: Dict, period: str) -> bytes:
-    """분기 보고서: 부서별·유형별·사이트별·월별·의도유형 집계 다중시트 엑셀."""
-    rows = []
-    for a in articles:
-        d1 = a.get("department_id")
-        rows.append({
+    """분기 보고서: 부서별·유형별·사이트별·월별·의도유형 집계 다중시트 엑셀.
+
+    부서별 시트는 **복수 부서 매칭(요구 Q4)을 반영해 소관 부서마다 1건씩 계상**한다.
+    한 글이 2개 부서에 걸치면 두 부서 모두에서 세어진다("하나의 기사가 여러 부서에
+    걸치는 경우가 종종 있습니다"). 그래서 부서별 시트 합계는 총 건수보다 클 수 있어,
+    요약 시트에 그 사실을 명시한다. 다른 시트는 글 1건을 1건으로만 센다.
+    """
+    def base(a):
+        return {
             "월":       (a.get("created_at") or "")[:7],
-            "부서":     dept_map.get(d1, "(미배정)") if d1 else "(미배정)",
             "분류구분":  a.get("category") or "(미분류)",
             "조치유형":  a.get("action_type") or "(미분류)",
             "거짓척도":  a.get("false_level") or "(미분류)",
@@ -152,11 +155,27 @@ def build_quarterly_excel(articles: List[Dict], dept_map: Dict, period: str) -> 
             "출처":     a.get("source_type") or "(미상)",
             # 수집분/업로드분 구분 — 통합 보고서에서 어느 경로로 들어온 건인지 (Phase 4)
             "구분":     a.get("origin") or "(미상)",
-        })
+        }
+
+    rows, dept_rows = [], []
+    multi = 0
+    for a in articles:
+        rows.append(base(a))
+        ids = [a.get("department_id"), a.get("department_id_2")]
+        names = [dept_map.get(i) for i in ids if i]
+        names = [n for n in names if n]
+        if len(names) > 1:
+            multi += 1
+        for name in (names or ["(미배정)"]):
+            dept_rows.append({**base(a), "부서": name})
+
     df = pd.DataFrame(rows)
+    ddf = pd.DataFrame(dept_rows)
 
     # 요약 시트 (long-format)
     summary = [["기간", period, ""], ["총 건수", "", len(df)]]
+    if multi:
+        summary.append(["복수 부서 매칭", f"{multi}건 — 부서별 시트는 부서마다 1건씩 계상", ""])
     if not df.empty:
         for dim in ["구분", "조치유형", "분류구분", "거짓척도", "의도유형", "출처"]:
             for item, cnt in df[dim].value_counts().items():
@@ -168,9 +187,9 @@ def build_quarterly_excel(articles: List[Dict], dept_map: Dict, period: str) -> 
         summary_df.to_excel(writer, sheet_name="요약", index=False)
         if not df.empty:
             _pivot(df, "월", "분류구분").to_excel(writer, sheet_name="월별_분류구분")
-            _pivot(df, "부서", "분류구분").to_excel(writer, sheet_name="부서별_분류구분")
+            _pivot(ddf, "부서", "분류구분").to_excel(writer, sheet_name="부서별_분류구분")
             _pivot(df, "출처", "분류구분").to_excel(writer, sheet_name="사이트별_분류구분")
-            _pivot(df, "부서", "조치유형").to_excel(writer, sheet_name="부서별_조치유형")
+            _pivot(ddf, "부서", "조치유형").to_excel(writer, sheet_name="부서별_조치유형")
         for ws in writer.sheets.values():
             _autofit(ws)
     return buf.getvalue()
