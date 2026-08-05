@@ -150,13 +150,15 @@ def build_quarterly_excel(articles: List[Dict], dept_map: Dict, period: str) -> 
             "거짓척도":  a.get("false_level") or "(미분류)",
             "의도유형":  a.get("intent_type") or "(미분류)",
             "출처":     a.get("source_type") or "(미상)",
+            # 수집분/업로드분 구분 — 통합 보고서에서 어느 경로로 들어온 건인지 (Phase 4)
+            "구분":     a.get("origin") or "(미상)",
         })
     df = pd.DataFrame(rows)
 
     # 요약 시트 (long-format)
     summary = [["기간", period, ""], ["총 건수", "", len(df)]]
     if not df.empty:
-        for dim in ["조치유형", "분류구분", "거짓척도", "의도유형", "출처"]:
+        for dim in ["구분", "조치유형", "분류구분", "거짓척도", "의도유형", "출처"]:
             for item, cnt in df[dim].value_counts().items():
                 summary.append([dim, item, int(cnt)])
     summary_df = pd.DataFrame(summary, columns=["구분", "항목", "건수"])
