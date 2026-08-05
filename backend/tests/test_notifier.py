@@ -145,6 +145,50 @@ check("min_score=1: 미분류(None) 제외",
 
 notifier._send = _real_send
 
+
+# ── 3. 엑셀 서식 + 부서 임베드 회귀 방지 ──
+# crawled_articles → departments 외래키가 1·2순위 2개라, 조회 시 어느 쪽인지 명시하지
+# 않으면 PostgREST가 "more than one relationship was found"로 거부한다(006 이후).
+# 실제로 이 때문에 엑셀 저장·이메일·기사목록이 한꺼번에 깨졌다.
+print()
+print("[3] 부서 임베드 명시 + 엑셀 서식")
+import io, pathlib, openpyxl
+
+for name, src in [("exporter", pathlib.Path("app/services/exporter.py").read_text(encoding="utf-8")),
+                  ("notifier", pathlib.Path("app/services/notifier.py").read_text(encoding="utf-8")),
+                  ("crawl API", pathlib.Path("app/api/crawl.py").read_text(encoding="utf-8"))]:
+    bare = "departments(name)" in src and "crawled_articles_department_id_fkey" not in src
+    check(f"{name}: 부서 임베드에 외래키 명시", not bare,
+          "departments(name)만 쓰면 부서 FK가 2개라 조회가 실패한다")
+
+rows = [{
+    "source_type": "커뮤니티", "published_at": "2026-08-05T09:00:00Z",
+    "false_score": 85, "false_level": "높음", "label_l2": "방법안내", "subject": "정신과",
+    "category": "편법·속임수·공정성 훼손", "action_type": "삭제대상",
+    "intent_type": "악의적 유포", "content_type": "과장/왜곡", "false_reason": "수법 안내",
+    "dept1": {"name": "병역조사과"}, "dept2": {"name": "병역판정검사과"},
+    "title": "5급 받는 법", "content": "정공 4급인 사람들 5급 받는법", "url": "http://t.test/1",
+    "response_status": "미확인",
+}]
+wb = openpyxl.load_workbook(io.BytesIO(notifier._build_excel(rows)))
+ws = wb.active
+hdr = [c.value for c in ws[2]]
+row = [c.value for c in ws[3]]
+cell = dict(zip(hdr, row))
+
+for col in ["분류구분", "조치유형", "의도유형", "내용유형", "소관부서2", "제목"]:
+    check(f"엑셀에 '{col}' 열", col in hdr, f"열 목록 {hdr}")
+check("1순위 부서", cell.get("소관부서") == "병역조사과", f"got {cell.get('소관부서')}")
+check("2순위 부서(요구 Q4)", cell.get("소관부서2") == "병역판정검사과", f"got {cell.get('소관부서2')}")
+check("제목 채워짐(요구 R2)", cell.get("제목") == "5급 받는 법", f"got {cell.get('제목')}")
+check("조치유형 채워짐", cell.get("조치유형") == "삭제대상", f"got {cell.get('조치유형')}")
+
+# 구버전 응답(부서 임베드가 departments 키)도 깨지지 않아야 한다
+legacy = [dict(rows[0], dept1=None, dept2=None, departments={"name": "홍보과"})]
+ws2 = openpyxl.load_workbook(io.BytesIO(notifier._build_excel(legacy))).active
+c2 = dict(zip([c.value for c in ws2[2]], [c.value for c in ws2[3]]))
+check("구버전 departments 키 폴백", c2.get("소관부서") == "홍보과", f"got {c2.get('소관부서')}")
+
 print()
 if failures:
     print(f"FAILED: {failures}")

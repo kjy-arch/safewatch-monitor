@@ -14,7 +14,9 @@ KST = timezone(timedelta(hours=9))
 
 def fetch_articles(scope: str = "today", false_level: str | None = None) -> list:
     """저장된 기사 조회. scope=today(오늘 수집분) | all(전체)."""
-    query = supabase.table("crawled_articles").select("*, departments(name)")
+    # 부서 FK가 2개(1·2순위)라 어느 쪽인지 명시해야 한다. 생략하면 PostgREST가
+    # "more than one relationship was found"로 거부한다 (006 이후).
+    query = supabase.table("crawled_articles").select("*, dept1:departments!crawled_articles_department_id_fkey(name),dept2:departments!crawled_articles_department_id_2_fkey(name)")
 
     if scope == "today":
         today_start = (

@@ -212,3 +212,9 @@ export async function getItemHistory(table, id) {
   const res = await fetch(`${BASE}/review/${table}/${id}/history`)
   return res.json()
 }
+
+export function articlesExportUrl({ scope = 'today', false_level = '' } = {}) {
+  const qs = new URLSearchParams({ scope })
+  if (false_level) qs.set('false_level', false_level)
+  return `${BASE}/articles/export?${qs}`
+}
