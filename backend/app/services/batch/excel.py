@@ -7,20 +7,25 @@ from typing import List, Dict, Any
 VALID_SOURCE_TYPES = {"언론", "SNS", "커뮤니티", "유튜브"}
 
 # 컬럼명 자동 인식 매핑 (한글/영문 모두 지원)
-TEXT_ALIASES = {
-    "text", "내용", "내 용", "텍스트", "본문", "기사내용", "기사본문",
-    "게시글", "댓글", "내용물", "원문", "제목", "타이틀"
-}
-SOURCE_TYPE_ALIASES = {
-    "source_type", "출처", "출처유형", "유형", "구분", "type", "분류"
-}
-SOURCE_URL_ALIASES = {
-    "source_url", "url", "링크", "주소", "출처링크", "기사링크", "원문링크"
-}
+#
+# ⚠️ TEXT_ALIASES는 **순서가 곧 우선순위**라서 튜플이어야 한다. set으로 두면 순회 순서가
+#   임의라, 제목·내용이 모두 있는 엑셀에서 짧은 '제목'이 원문으로 선택돼 본문이 통째로
+#   분류에서 빠지는 일이 생긴다(실제로 발생). 본문 계열을 앞에, 제목은 최후순위에 둔다.
+TEXT_ALIASES = (
+    "원문", "내용", "내 용", "본문", "text", "텍스트", "기사내용", "기사본문",
+    "게시글", "게시내용", "댓글", "내용물",
+    "제목", "타이틀", "title",   # 본문 열이 전혀 없을 때만 쓰는 최후 수단
+)
+SOURCE_TYPE_ALIASES = (
+    "source_type", "출처", "출처유형", "유형", "구분", "type", "분류",
+)
+SOURCE_URL_ALIASES = (
+    "source_url", "url", "링크", "주소", "출처링크", "기사링크", "원문링크",
+)
 
 
 def _find_col(columns, aliases):
-    """컬럼명 목록에서 aliases 중 일치하는 첫 번째 컬럼명 반환."""
+    """컬럼명 목록에서 aliases를 **앞에서부터** 찾아 먼저 맞는 컬럼명 반환."""
     cols_lower = {c.strip().lower(): c for c in columns}
     for alias in aliases:
         if alias.lower() in cols_lower:
@@ -30,7 +35,7 @@ def _find_col(columns, aliases):
 
 def _looks_like_header(values) -> bool:
     """행의 값들이 헤더처럼 보이는지 — 인식 가능한 별칭이 하나라도 있으면 헤더."""
-    known = TEXT_ALIASES | SOURCE_TYPE_ALIASES | SOURCE_URL_ALIASES
+    known = set(TEXT_ALIASES) | set(SOURCE_TYPE_ALIASES) | set(SOURCE_URL_ALIASES)
     return any(str(v).strip().lower() in known for v in values if str(v).strip())
 
 

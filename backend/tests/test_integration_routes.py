@@ -33,8 +33,11 @@ MONITOR = {
     "/api/health", "/api/crawl/sources", "/api/crawl/run", "/api/crawl/status",
     "/api/crawl/backlog", "/api/crawl/analyze", "/api/articles",
     "/api/articles/export", "/api/stats",
-    "/api/classify/excel", "/api/classify/result", "/api/classify/export",
 }
+# 실행 이력·담당자 (Phase 3)
+RUNS = {"/api/operator", "/api/runs", "/api/runs/active"}
+# Phase 3-2에서 폐기 — 메모리 방식 엑셀 분류(결과가 서버 종료 시 소멸)
+RETIRED = {"/api/classify/excel", "/api/classify/result", "/api/classify/export"}
 # 분류자 계열 — 배치 업로드·부서·보고서·설정
 CLASSIFIER = {
     "/api/batches", "/api/batches/upload", "/api/batches/{batch_id}",
@@ -51,6 +54,14 @@ for p in sorted(MONITOR):
 print("\n[분류자 계열]")
 for p in sorted(CLASSIFIER):
     check(p, p in paths)
+
+print("\n[실행 이력]")
+for p in sorted(RUNS):
+    check(p, p in paths)
+
+print("\n[폐기된 메모리 방식 엑셀 분류]")
+for p in sorted(RETIRED):
+    check(f"{p} 제거됨", p not in paths)
 
 print("\n[구성 검증]")
 dupes = {r for r in routes if routes.count(r) > 1}

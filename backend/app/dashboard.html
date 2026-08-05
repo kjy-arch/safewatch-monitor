@@ -110,6 +110,11 @@
   <div class="tabs">
     <div class="tab active" id="tabBtnMonitor" onclick="showTab('monitor')">📡 실시간 수집</div>
     <div class="tab" id="tabBtnExcel" onclick="showTab('excel')">📊 엑셀 분류</div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">
+      담당자 <b id="opName" style="color:var(--ink)">…</b>
+      <span id="opWarn" style="display:none;color:var(--warn)">· 미등록</span>
+      <button onclick="setOperator()" style="padding:4px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer" id="opSet">이름 등록</button>
+    </div>
   </div>
 
   <!-- ===== 탭 ①: 실시간 수집 ===== -->
@@ -183,35 +188,42 @@
         <span class="ic">📤</span>
         <div style="flex:1">
           <div style="font-size:14px;font-weight:600">엑셀 파일 선택 (.xlsx)</div>
-          <div class="foot" style="margin:2px 0 8px">Monitor 수집 엑셀 또는 임의 엑셀 · '원문' 또는 '내용' 열이 있으면 됩니다.</div>
+          <div class="foot" style="margin:2px 0 8px">Monitor 수집 엑셀 또는 임의 엑셀 · '원문'·'내용'·'제목' 열이 있으면 됩니다.</div>
           <input type="file" id="xlfile" accept=".xlsx">
         </div>
-        <select id="clsLimit" style="height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:14px">
-          <option value="50">50건</option>
-          <option value="200" selected>200건</option>
-          <option value="500">500건</option>
-          <option value="5000">전체</option>
-        </select>
-        <button id="clsBtn" class="primary" onclick="classifyExcel()">분류 실행</button>
+        <button id="clsBtn" class="primary" onclick="uploadExcel()">업로드</button>
       </div>
       <p class="foot" id="clsMsg"></p>
       <div class="barlabel"><span id="clsPhase">대기 중</span><span class="pct" id="clsPct">0%</span></div>
       <div class="track"><div class="fill" id="clsFill"></div></div>
     </div>
 
+    <!-- 지난 작업 열기 — 다른 담당자가 올린 배치도 DB에 남아 그대로 열린다 -->
+    <div class="card">
+      <div class="rowtop" style="margin-bottom:8px">
+        <h3 class="sec" style="margin:0">지난 분류 작업 <span style="color:var(--muted);font-weight:400">· 담당자 공용</span></h3>
+        <button id="analyzeBtn" class="primary" onclick="startBatchAnalyze()" style="display:none">분석 시작</button>
+      </div>
+      <select id="batchSel" onchange="openBatch(this.value)"
+              style="width:100%;height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:14px">
+        <option value="">불러오는 중…</option>
+      </select>
+      <p class="foot" id="batchMeta" style="margin-top:8px"></p>
+    </div>
+
     <div class="grid">
       <div class="tile"><div class="k">분류 대상</div><div class="v" id="cTotal">0</div></div>
-      <div class="tile dang"><div class="k">높음</div><div class="v" id="cHigh">0</div></div>
-      <div class="tile warn"><div class="k">중간</div><div class="v" id="cMid">0</div></div>
-      <div class="tile ok"><div class="k">낮음</div><div class="v" id="cLow">0</div></div>
+      <div class="tile dang"><div class="k">삭제대상</div><div class="v" id="cDel">0</div></div>
+      <div class="tile warn"><div class="k">종합판단</div><div class="v" id="cMid">0</div></div>
+      <div class="tile ok"><div class="k">비대상</div><div class="v" id="cLow">0</div></div>
     </div>
 
     <div class="card">
       <div class="rowtop" style="margin-bottom:8px">
         <h3 class="sec" style="margin:0">분류 결과 <span style="color:var(--muted);font-weight:400">· 위험순</span></h3>
-        <a class="dl" id="clsExport" href="/api/classify/export" style="display:none">📥 결과 엑셀 저장</a>
+        <a class="dl" id="clsExport" href="#" style="display:none">📥 결과 엑셀 저장</a>
       </div>
-      <div id="results"><p class="foot">엑셀을 올리고 «분류 실행»을 누르면 결과가 여기에 표시됩니다.</p></div>
+      <div id="results"><p class="foot">엑셀을 올리거나 위에서 지난 작업을 선택하면 결과가 표시됩니다.</p></div>
     </div>
   </section>
 </div>
@@ -226,6 +238,27 @@ function showTab(name) {
   $("tabExcel").classList.toggle("hidden", mon);
   $("tabBtnMonitor").classList.toggle("active", mon);
   $("tabBtnExcel").classList.toggle("active", !mon);
+  if (!mon) loadBatches(curBatch);   // 다른 담당자가 올린 배치도 보이도록 매번 갱신
+}
+
+/* ---------- 담당자 (실행 이력에 기록됨 · 인증 아님) ---------- */
+async function loadOperator() {
+  let o;
+  try { o = await (await fetch("/api/operator")).json(); } catch (e) { return; }
+  $("opName").textContent = o.display || "미상";
+  $("opSet").textContent = o.configured ? "변경" : "이름 등록";
+  if (!o.configured) $("opWarn").style.display = "inline";
+}
+async function setOperator() {
+  const name = prompt("담당자 이름을 입력하세요 (실행 이력에 기록됩니다)");
+  if (!name || !name.trim()) return;
+  try {
+    await fetch("/api/operator", { method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }) });
+    $("opWarn").style.display = "none";
+    loadOperator();
+  } catch (e) { alert("저장 실패"); }
 }
 
 /* ---------- 탭 ①: 실시간 수집 ---------- */
@@ -362,60 +395,111 @@ async function startCrawl() {
   setTimeout(pollStatus, 500);
 }
 
-/* ---------- 탭 ②: 엑셀 분류 ---------- */
+/* ---------- 탭 ②: 엑셀 분류 (DB 저장 — 담당자 간 인수인계 가능) ----------
+   결과가 batches/articles 테이블에 남으므로, A가 올린 배치를 B가 다른 PC에서
+   그대로 열 수 있다. (예전 메모리 방식은 서버를 끄면 결과가 사라졌다.) */
 const LVL = { "높음":"high", "중간":"mid", "낮음":"low" };
-async function classifyExcel() {
+let curBatch = null;
+
+async function loadBatches(selectId) {
+  let list = [];
+  try { list = await (await fetch("/api/batches")).json(); } catch (e) { return; }
+  const sel = $("batchSel");
+  sel.innerHTML = '<option value="">— 작업 선택 —</option>' + list.map(b => {
+    const when = (b.created_at || "").slice(0, 16).replace("T", " ");
+    const done = b.status === "done" ? "완료" : b.status === "analyzing" ? "분석 중" : "미분석";
+    return `<option value="${esc(b.id)}">${when} · ${esc(b.file_name)} · ${b.total_rows}건 · ${done}</option>`;
+  }).join("");
+  if (selectId) sel.value = selectId;
+}
+
+async function uploadExcel() {
   const f = $("xlfile").files[0];
   if (!f) { $("clsMsg").textContent = "먼저 엑셀 파일을 선택하세요."; return; }
   const fd = new FormData(); fd.append("file", f);
-  const limit = $("clsLimit").value;
   const btn = $("clsBtn"); btn.disabled = true; btn.textContent = "업로드 중…";
   try {
-    const r = await (await fetch(`/api/classify/excel?limit=${limit}`,
-                                 { method: "POST", body: fd })).json();
-    $("clsMsg").textContent = r.message + (r.total ? ` (${r.total}건)` : "");
-    $("cTotal").textContent = r.total || 0;
-  } catch (e) { $("clsMsg").textContent = "업로드 실패"; }
-  setTimeout(pollClassify, 600);
+    const res = await fetch("/api/batches/upload", { method: "POST", body: fd });
+    const r = await res.json();
+    if (!res.ok) throw new Error(r.detail || "업로드 실패");
+    curBatch = r.batch_id;
+    $("clsMsg").textContent = `${r.total_rows}건 업로드 완료 — «분석 시작»을 누르세요.`;
+    $("cTotal").textContent = r.total_rows;
+    await loadBatches(curBatch);
+    $("analyzeBtn").style.display = "inline-flex";
+    openBatch(curBatch, true);
+  } catch (e) { $("clsMsg").textContent = "업로드 실패: " + e.message; }
+  btn.disabled = false; btn.textContent = "업로드";
 }
-async function pollClassify() {
-  let s;
-  try { s = await (await fetch("/api/classify/result")).json(); } catch (e) { return; }
-  const running = s.status === "running";
-  const pct = s.percent || 0;
-  $("clsFill").style.width = pct + "%"; $("clsPct").textContent = pct + "%";
-  // 중단(크레딧 소진 등)됐으면 '완료'로 보이지 않게 실제 처리 건수와 사유를 표시
-  const stopped = s.status === "done" && s.total && s.done < s.total;
-  $("clsPhase").textContent = running ? `분류 중 · ${s.done}/${s.total}건`
-    : s.status !== "done" ? "대기 중"
-    : stopped ? `중단됨 · ${s.done}/${s.total}건 처리` : `완료 · ${s.done}건`;
-  if (s.status === "done" && s.message)
-    $("clsMsg").textContent = "⚠️ " + s.message;
-  const btn = $("clsBtn"); btn.disabled = running; btn.textContent = running ? "분류 중…" : "분류 실행";
 
-  const rs = (s.results || []).slice().sort((a,b) => (b.false_score||0) - (a.false_score||0));
+async function startBatchAnalyze() {
+  if (!curBatch) return;
+  const btn = $("analyzeBtn"); btn.disabled = true; btn.textContent = "분석 중…";
+  try {
+    await fetch(`/api/batches/${curBatch}/analyze`, { method: "POST" });
+    $("clsMsg").textContent = "분석을 시작했습니다. 미완료·실패 행만 처리되므로 재실행해도 안전합니다.";
+  } catch (e) { $("clsMsg").textContent = "분석 시작 실패"; }
+  setTimeout(() => pollBatch(), 800);
+}
+
+async function openBatch(id, skipReload) {
+  if (!id) return;
+  curBatch = id;
+  $("analyzeBtn").style.display = "inline-flex";
+  $("clsExport").href = `/api/batches/${id}/download`;
+  if (!skipReload) $("clsMsg").textContent = "";
+  pollBatch();
+}
+
+async function pollBatch() {
+  if (!curBatch) return;
+  let d;
+  try { d = await (await fetch(`/api/batches/${curBatch}`)).json(); } catch (e) { return; }
+  const b = d.batch || {}, arts = d.articles || [];
+
+  const total = b.total_rows || arts.length;
+  const done  = arts.filter(a => a.status === "done").length;
+  const failed = arts.filter(a => a.status === "failed").length;
+  const running = b.status === "analyzing";
+  const pct = total ? Math.round(done / total * 100) : 0;
+
+  $("clsFill").style.width = pct + "%"; $("clsPct").textContent = pct + "%";
+  $("clsPhase").textContent = running ? `분석 중 · ${done}/${total}건`
+    : done === 0 ? "미분석 — «분석 시작»을 누르세요"
+    : done < total ? `중단됨 · ${done}/${total}건 처리` : `완료 · ${done}건`;
+  $("batchMeta").textContent =
+    `${b.file_name || ""} · 업로드 ${(b.created_at || "").slice(0,16).replace("T"," ")}`
+    + (failed ? ` · 실패 ${failed}건 (분석 시작을 다시 누르면 실패분만 재분석)` : "");
+
+  const btn = $("analyzeBtn");
+  btn.disabled = running;
+  btn.textContent = running ? "분석 중…" : (done && done >= total ? "재분석" : "분석 시작");
+
+  const rs = arts.filter(a => a.status === "done")
+                 .sort((a,b) => (b.false_score||0) - (a.false_score||0));
   $("clsExport").style.display = rs.length ? "inline-flex" : "none";
-  $("cHigh").textContent = rs.filter(r => r.false_level === "높음").length;
-  $("cMid").textContent  = rs.filter(r => r.false_level === "중간").length;
-  $("cLow").textContent  = rs.filter(r => r.false_level === "낮음").length;
-  if (s.total) $("cTotal").textContent = s.total;
+  $("cTotal").textContent = total;
+  $("cDel").textContent = rs.filter(r => r.action_type === "삭제대상").length;
+  $("cMid").textContent = rs.filter(r => r.action_type === "종합판단").length;
+  $("cLow").textContent = rs.filter(r => r.action_type === "비대상").length;
 
   $("results").innerHTML = rs.length ? rs.map(r => {
     const cls = LVL[r.false_level] || "";
     const chips = [
       `<span class="chip score">점수 ${r.false_score ?? "-"} · ${esc(r.false_level || "미분류")}</span>`,
+      r.action_type ? `<span class="chip">${esc(r.action_type)}</span>` : "",
+      r.category ? `<span class="chip">${esc(r.category)}</span>` : "",
       r.label_l2 ? `<span class="chip">${esc(r.label_l2)}</span>` : "",
       r.subject ? `<span class="chip">${esc(r.subject)}</span>` : "",
-      r.department_name ? `<span class="chip">${esc(r.department_name)}</span>` : "",
-      r.url ? `<a class="chip" href="${esc(r.url)}" target="_blank">링크</a>` : "",
+      r.source_url ? `<a class="chip" href="${esc(r.source_url)}" target="_blank">링크</a>` : "",
     ].join("");
-    return `<div class="res ${cls}"><div class="txt">${esc(r.text)}</div><div class="chips">${chips}</div></div>`;
-  }).join("") : '<p class="foot">결과 없음.</p>';
+    return `<div class="res ${cls}"><div class="txt">${esc(r.original_text || "")}</div><div class="chips">${chips}</div></div>`;
+  }).join("") : '<p class="foot">아직 분석된 행이 없습니다.</p>';
 
-  if (running) setTimeout(pollClassify, 1500);
+  if (running) setTimeout(pollBatch, 2000);
 }
 
-pollStatus(); loadSources(); loadBacklog();
+pollStatus(); loadSources(); loadBacklog(); loadOperator(); loadBatches();
 setInterval(pollStatus, 1500);   // 진행률·건수·출처별 모두 이번 실행 기준으로 갱신
 </script>
 </body>
