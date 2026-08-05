@@ -271,63 +271,68 @@ Phase 5에서 모니터 대시보드와 분류자 React를 하나로 합쳤다. 
 ## 8. 폴더 구조
 
 ```
-safewatch-monitor/
-├── SPEC.md
-├── backend/
-│   ├── .env                      # 환경 변수 (git 미추적)
-│   ├── requirements.txt
-│   ├── run_monitor.bat           # 실행 런처 (바탕화면 아이콘 대상)
-│   ├── app/
-│   │   ├── main.py               # FastAPI 앱 (stdout UTF-8 고정)
-│   │   ├── dashboard.html        # 운영 대시보드 (단일 HTML)
-│   │   ├── api/
-│   │   │   ├── crawl.py          # 수집·분류·엑셀 API
-│   │   │   ├── dashboard.py      # `/` 대시보드 서빙
-│   │   │   └── health.py
-│   │   ├── core/
-│   │   │   ├── config.py         # 설정(pydantic-settings)
-│   │   │   ├── database.py       # Supabase 클라이언트
-│   │   │   ├── progress.py       # 실행 진행 상태(인메모리)
-│   │   │   └── scheduler.py      # 실행 오케스트레이션 + 소스 위험 분류
-│   │   ├── crawlers/             # naver / youtube / dcinside / fmkorea
-│   │   │   ├── instagram.py · x.py · tiktok.py
-│   │   │   └── storage.py        # 중복 제거 + 일괄 저장
-│   │   ├── data/keyword_scores.json   # 사전필터 점수 사전
-│   │   ├── models/               # (빈 폴더)
-│   │   └── services/
-│   │       ├── analyzer.py           # Gemini 분류
-│   │       ├── classifier_prompt.py  # 병무청 7라벨 프롬프트
-│   │       ├── keyword_scorer.py     # 키워드 사전필터
-│   │       ├── excel_classifier.py   # 업로드 엑셀 분류
-│   │       ├── exporter.py           # 엑셀 조회·생성·파일 저장
-│   │       └── notifier.py           # 이메일 알림 + 엑셀 서식
-│   ├── tests/                    # 파싱·저장·분류 단위 테스트 (네트워크·DB 불필요)
-│   └── database/migrations/      # 001~005 SQL
-├── frontend/                     # (빈 골격 — React 미착수)
-└── docs/                         # (빈 폴더)
+backend/
+  app/
+    main.py                    FastAPI 진입 (stdout UTF-8 고정 — Windows cp949 대응)
+    dashboard.html             구형 단일 화면 (React 빌드 없을 때 폴백)
+    api/                       health · crawl · upload · departments · reports
+                               settings · docs · runs · review · dashboard
+    core/
+      config.py                환경 변수
+      database.py              Supabase 클라이언트
+      scheduler.py             수집 오케스트레이션 + SAFE/GRAY 소스 구분
+      progress.py              수집 진행률 (인메모리)
+      operator.py              담당자 식별 (Windows 계정 + 등록 이름)
+    crawlers/                  naver · youtube · dcinside · fmkorea
+                               instagram · x · tiktok · storage(중복 저장 방지)
+    services/
+      unified_prompt.py        ★ 통합 분류 프롬프트 + 두 축 공통 파서
+      classifier_prompt.py     축 A 라벨·점수구간·과목 정의
+      analyzer.py              수집분 분류
+      keyword_scorer.py        키워드 사전필터 (Gemini 호출 절감)
+      unified_query.py         수집분+업로드분 통합 조회 (중복 제거)
+      review.py                검수·재분류 (허용목록 기반)
+      run_log.py               실행 이력
+      exporter.py / notifier.py  엑셀 산출 · 이메일
+      batch/                   분류자 이식분 — analyzer · excel · stats
+                               app_settings · doc_service(RAG)
+    data/keyword_scores.json   키워드 점수 사전 (gitignore — 설치 시 생성)
+  database/migrations/         001~008 (Supabase SQL Editor에서 순서대로 실행)
+  tests/                       14개 — 네트워크·DB 없이 실행
+  eval/                        골든셋 + 축 B 평가 하네스
+  eval_classifier.py           축 A 평가 (라벨 데이터)
+  validate_prefilter.py        사전필터 임계치 검증
+  validate_news_prefilter.py   언론 구간 안전성 검증
+  build_keyword_scores.py      키워드 사전 생성 (설치 절차 3단계)
+  setup.bat / run_monitor.bat  설치 / 실행
+
+frontend/                      React 19 + Vite + Tailwind
+  src/pages/                   Collect · Upload · BatchList · BatchDetail
+                               Review · Report · Runs · Admin
+  src/api.js                   상대경로 /api — 같은 서버가 서빙하므로 CORS 불필요
+  dist/                        빌드 산출물 (gitignore — 없으면 dashboard.html 폴백)
+
+docs/요구사항_대조.md          사이버조사과 요구 20건 ↔ 구현 대조
 ```
 
----
+> `backend/compare_keyword_effect.py` · `eval_exclude_pilot.py` · `run_classify.py`는
+> 초기 실험용 스크립트로, 현재 운영 경로에서는 쓰이지 않는다(정리 여부 미결).
 
 ## 9. 개발 단계
 
 | 단계 | 내용 | 상태 |
 |------|------|------|
-| 1 | 프로젝트 구조 + SPEC.md | ✅ 완료 |
-| 2 | DB 테이블 생성 (Supabase) | ✅ 완료 (001~005 적용) |
-| 3 | FastAPI 기본 세팅 + 환경설정 | ✅ 완료 |
-| 4 | 네이버 크롤러 (뉴스/블로그/카페/지식인) | ✅ 완료 |
-| 5 | 유튜브 크롤러 | ✅ 완료 |
-| 6 | 디시인사이드 · 에펨코리아 크롤러 | ✅ 완료 |
-| 7 | AI 분류 연동 (Gemini) | ✅ 완료 — 병무청 공식 7라벨 |
-| 8 | APScheduler 자동 스케줄링 | ✅ 완료 — **`AUTO_CRAWL=false`로 비활성(테스트 단계)** |
-| 9 | 이메일 알림 | ✅ 완료 (min_score 필터, 엑셀 첨부) |
-| 10 | 운영 대시보드 UI | ✅ 완료 — 단일 HTML. React 고도화는 미착수 |
-| 11 | SNS 채널 확장 (인스타·X·틱톡) | ✅ 코드 완료 — 자격증명 확보 후 활성화 |
-| 12 | 진행률·엑셀 산출·소스 선택·백로그 분류 | ✅ 완료 |
-| 13 | 회색 소스 법무·정보보안 검토 | ⬜ 대기 (사용자 액션) |
-
----
+| 1~11 | 수집기·분류기·대시보드·SNS 채널·소스 선택·엑셀 산출 | 완료 |
+| 12 | 백로그 소진 기능 | 완료 |
+| 13 | SPEC 갱신 | 완료 |
+| **통합 1** | 분류자 백엔드 흡수 (`app/services/batch/`) | 완료 |
+| **통합 2** | 분류 축 통합 — 1회 호출로 두 축 산출 (006) | 완료 |
+| **통합 3** | 실행 이력 + 엑셀 분석 DB 영속화 (007) | 완료 |
+| **통합 4** | 분기 보고서를 수집분+업로드분 통합 집계로 | 완료 |
+| **통합 5** | React 통합 화면 (7탭) | 완료 |
+| **통합 6** | 검수·재분류 + 이력 (008) | 완료 |
+| **통합 7** | 문서 정리 | 완료 |
+| 남음 | 1년 보관·아카이빙(Q6) · 인증(서버 배포 시) · 회색소스 법무검토(D1) | 미착수 |
 
 ## 10. 분류 체계
 
