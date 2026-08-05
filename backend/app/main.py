@@ -14,6 +14,14 @@ from contextlib import asynccontextmanager
 from app.api.health import router as health_router
 from app.api.crawl import router as crawl_router
 from app.api.dashboard import router as dashboard_router
+# 분류자(배치 업로드) 계열 — safewatch-classifier에서 이식
+from app.api.departments import router as departments_router
+from app.api.upload import router as upload_router
+from app.api.reports import router as reports_router
+from app.api.settings import router as settings_router
+from app.api.docs import router as docs_router
+from app.api.runs import router as runs_router      # 실행 이력·담당자 (Phase 3)
+from app.api.review import router as review_router  # 검수·재분류 (Phase 6)
 from app.core.config import settings
 from app.core.scheduler import start_scheduler, stop_scheduler
 
@@ -41,4 +49,11 @@ app.add_middleware(
 
 app.include_router(health_router, prefix="/api")
 app.include_router(crawl_router, prefix="/api")
+app.include_router(departments_router, prefix="/api")
+app.include_router(upload_router, prefix="/api")
+app.include_router(reports_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
+app.include_router(docs_router, prefix="/api")
+app.include_router(runs_router, prefix="/api")
+app.include_router(review_router, prefix="/api")
 app.include_router(dashboard_router)  # 대시보드는 루트(/)에 서빙

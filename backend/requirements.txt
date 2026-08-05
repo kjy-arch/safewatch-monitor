@@ -10,3 +10,6 @@ pydantic-settings==2.5.2
 python-multipart==0.0.12
 holidays
 openpyxl
+# 분류자(배치) 계열 — app/services/batch/excel.py, doc_service.py
+pandas==2.2.3
+pdfplumber

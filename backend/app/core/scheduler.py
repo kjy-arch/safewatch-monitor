@@ -13,6 +13,7 @@ from app.crawlers.tiktok import crawl_tiktok
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import send_alerts
 from app.services import exporter
+from app.services import run_log
 from app.core import progress
 from app.core.config import settings
 
@@ -71,6 +72,7 @@ def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
         print(f"[감사] {ts} 회색지대 소스 포함 실행: {', '.join(gray)}")
 
     progress.start(len(sources))
+    run_id = run_log.start("crawl")
 
     total_saved = 0
     failed_sources = []
@@ -111,6 +113,7 @@ def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
         summary += f" (소스 오류: {', '.join(failed_sources)})"
     print(summary)
 
+    analyzed = 0
     try:
         if total_saved > 0:
             progress.start_classify()
@@ -133,8 +136,10 @@ def run_crawl_and_analyze(force: bool = False, source_ids: list | None = None):
                 # 저장 실패가 수집·분류 결과를 무효화하진 않으므로 로그만 남긴다
                 print(f"[스케줄러] 엑셀 저장 실패: {type(e).__name__}: {e}")
         progress.finish(summary)
+        run_log.finish(run_id, collected=total_saved, analyzed=analyzed, message=summary)
     except Exception as e:
         progress.fail(f"{type(e).__name__}: {e}")
+        run_log.fail(run_id, f"{type(e).__name__}: {e}")
         raise
 
 
@@ -145,13 +150,16 @@ def run_analyze_only(limit: int = 100):
         return
 
     progress.start_analyze(limit)
+    run_id = run_log.start("analyze")
     try:
         analyzed = analyze_unclassified(limit=limit, progress_cb=progress.classify_step)
         summary = f"미분류 {analyzed}건 분류 완료"
         print(f"[분류] {summary}")
         progress.finish(summary)
+        run_log.finish(run_id, analyzed=analyzed, message=summary)
     except Exception as e:
         progress.fail(f"{type(e).__name__}: {e}")
+        run_log.fail(run_id, f"{type(e).__name__}: {e}")
         raise
 
 

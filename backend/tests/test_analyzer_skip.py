@@ -47,6 +47,7 @@ class FakeQuery:
     def select(self, *a, **k): return self
     def is_(self, *a): return self
     def limit(self, n): return self
+    def order(self, *a, **k): return self  # analyzer가 최신순 정렬 후 조회
 
     @property
     def not_(self):

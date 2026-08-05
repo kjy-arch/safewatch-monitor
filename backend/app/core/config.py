@@ -4,6 +4,8 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_SECRET_KEY: str
     GEMINI_API_KEY: str
+    # 분류자(배치) 계열 서비스가 참조 — app/services/batch/analyzer.py
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     NAVER_CLIENT_ID: str
     NAVER_CLIENT_SECRET: str
     YOUTUBE_API_KEY: str
@@ -28,5 +30,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # 분류자 .env를 합쳐도 미정의 키로 기동 실패하지 않게 (SUPABASE_PUBLISHABLE_KEY 등)
+        extra = "ignore"
 
 settings = Settings()

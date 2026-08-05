@@ -2,16 +2,46 @@
 
 학습자료의 과목별 빈도 사전에서 병역 맥락 단어에 가중치를 부여한다.
 생성 파일은 병무청 내부자료 파생물이므로 git에 커밋하지 않는다 (.gitignore).
+→ **PC를 새로 설치할 때마다 이 스크립트를 한 번 돌려야 한다.** 안 돌리면 사전 필터가
+  조용히 꺼진 채로 동작해 모든 글이 Gemini로 가고 API 비용이 크게 늘어난다.
 
-사용법: .venv\\Scripts\\python.exe build_keyword_scores.py
+사용법 (backend 디렉터리에서):
+  .venv\\Scripts\\python.exe build_keyword_scores.py                 # 기본 경로 탐색
+  .venv\\Scripts\\python.exe build_keyword_scores.py --xlsx "D:\\자료\\키워드.xlsx"
+  set KEYWORD_XLSX=D:\\자료\\키워드.xlsx  &&  ... build_keyword_scores.py
+
+학습자료가 갱신되면 새 키워드.xlsx로 다시 실행하면 된다. 단, 사전이 바뀌면
+임계치(keyword_scorer.PREFILTER_THRESHOLD 등)의 근거가 달라지므로
+validate_prefilter.py로 재검증할 것.
 """
-import sys, json, os
+import sys, json, os, argparse
 sys.stdout.reconfigure(encoding="utf-8")
 import openpyxl
 
-XLSX = (r"C:\Users\somes\OneDrive\Desktop\전문인재\개별과제"
-        r"\2024년 학습자료(도입시)외2_암호화 완료\2024년 학습자료(도입시)외2\키워드.xlsx")
+# 원본 학습자료 위치 — PC마다 다르므로 인자 > 환경변수 > 기본 후보 순으로 찾는다
+DEFAULT_XLSX_CANDIDATES = [
+    (r"C:\Users\somes\OneDrive\Desktop\전문인재\개별과제"
+     r"\2024년 학습자료(도입시)외2_암호화 완료\2024년 학습자료(도입시)외2\키워드.xlsx"),
+    os.path.join(os.path.expanduser("~"), "Desktop", "키워드.xlsx"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "키워드.xlsx"),
+]
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "data", "keyword_scores.json")
+
+
+def resolve_xlsx(cli_path: str | None) -> str:
+    """인자 → 환경변수 → 기본 후보 순으로 키워드.xlsx를 찾는다."""
+    for path in [cli_path, os.environ.get("KEYWORD_XLSX"), *DEFAULT_XLSX_CANDIDATES]:
+        if path and os.path.isfile(path):
+            return path
+    print("[오류] 키워드.xlsx를 찾지 못했습니다.\n")
+    print("이 파일은 병무청 학습자료라 저장소에 포함되지 않습니다. 아래 중 하나로 지정하세요:")
+    print("  1) 인자로 지정   : build_keyword_scores.py --xlsx \"경로\\키워드.xlsx\"")
+    print("  2) 환경변수 지정 : set KEYWORD_XLSX=경로\\키워드.xlsx")
+    print("  3) backend 폴더에 키워드.xlsx를 복사한 뒤 다시 실행\n")
+    print("찾아본 위치:")
+    for p in DEFAULT_XLSX_CANDIDATES:
+        print(f"  - {p}")
+    sys.exit(1)
 
 # 시트별 기본 가중치 — '기타'(일반어 3,210개)와 '전체'(중복)는 제외
 SHEET_WEIGHTS = {
@@ -36,8 +66,13 @@ MIN_WORD_LEN = 2  # 1글자 단어 제외 (오탐 과다)
 
 
 def main():
+    ap = argparse.ArgumentParser(description="키워드 점수 사전 생성")
+    ap.add_argument("--xlsx", help="키워드.xlsx 경로 (미지정 시 KEYWORD_XLSX 환경변수·기본 후보 탐색)")
+    xlsx = resolve_xlsx(ap.parse_args().xlsx)
+    print(f"원본: {xlsx}")
+
     scores: dict[str, int] = dict(HIGH_SIGNAL)
-    wb = openpyxl.load_workbook(XLSX, read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     loaded = 0
     for ws in wb.worksheets:
         sheet_key = ws.title.split("-")[0]

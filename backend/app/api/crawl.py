@@ -1,10 +1,10 @@
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Body
+from fastapi import APIRouter, BackgroundTasks, Body
 from fastapi.responses import Response
 from app.core.scheduler import run_crawl_and_analyze, run_analyze_only, tier_of
 from app.services.analyzer import analyze_unclassified
 from app.services.notifier import _build_excel
-from app.services import excel_classifier, exporter
+from app.services import exporter
 from app.core.database import supabase
 from app.core import progress
 
@@ -59,59 +59,6 @@ def export_articles(scope: str = "today", false_level: str = None):
         content=xlsx,
         media_type=XLSX_MIME,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.post("/classify/excel")
-async def classify_excel(background_tasks: BackgroundTasks,
-                         file: UploadFile = File(...), limit: int = 200):
-    """업로드된 엑셀의 원문을 Monitor 분류기로 분류 (백그라운드). 진행은 /classify/result로 폴링."""
-    if excel_classifier.snapshot()["status"] == "running":
-        return {"message": "이미 분류가 진행 중입니다.", "total": 0}
-
-    data = await file.read()
-    try:
-        rows = excel_classifier.parse_excel(data)
-    except Exception as e:
-        return {"message": f"엑셀을 읽지 못했습니다: {type(e).__name__}", "total": 0}
-    if not rows:
-        return {"message": "원문(내용) 열을 찾지 못했습니다. '원문' 또는 '내용' 열을 확인하세요.", "total": 0}
-
-    background_tasks.add_task(excel_classifier.run, rows, limit)
-    return {"message": "분류를 시작했습니다.", "total": min(len(rows), limit)}
-
-
-@router.get("/classify/result")
-def classify_result():
-    """엑셀 분류 진행 상태 + 결과 (대시보드 폴링용)."""
-    return excel_classifier.snapshot()
-
-
-@router.get("/classify/export")
-def classify_export():
-    """엑셀 분류 결과를 xlsx로 다운로드 (수집 엑셀과 동일 서식 재사용)."""
-    results = excel_classifier.snapshot()["results"]
-    articles = [{
-        "source_type":     r.get("source") or "",
-        "published_at":    "",
-        "false_score":     r.get("false_score"),
-        "false_level":     r.get("false_level"),
-        "label_l2":        r.get("label_l2"),
-        "subject":         r.get("subject"),
-        "false_reason":    r.get("false_reason"),
-        "departments":     {"name": r.get("department_name") or ""},
-        "content":         r.get("text") or "",
-        "title":           "",
-        "url":             r.get("url") or "",
-        "response_status": "미확인",
-    } for r in results]
-
-    xlsx = _build_excel(articles)
-    stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d_%H%M")
-    return Response(
-        content=xlsx,
-        media_type=XLSX_MIME,
-        headers={"Content-Disposition": f'attachment; filename="classified_{stamp}.xlsx"'},
     )
 
 

@@ -3,7 +3,7 @@
 > 병무청 관련 언론·SNS·커뮤니티·유튜브 콘텐츠를 수집하고, AI로 허위성·의도·부서를
 > 분류하여 운영 대시보드·이메일 알림·엑셀 산출물로 제공하는 모니터링 시스템.
 
-*최종 갱신: 2026-08-03*
+*최종 갱신: 2026-08-05*
 
 ---
 
@@ -18,6 +18,39 @@
 | DB | Supabase (kjy-arch/safewatch-classifier와 동일 프로젝트) |
 | 실행 | 바탕화면 아이콘 → `backend/run_monitor.bat` → http://localhost:8001 |
 
+### 설치 절차 (PC마다 최초 1회)
+
+`backend/setup.bat` 실행 — 가상환경 → 의존성 → **키워드 점수 사전** 순으로 진행한다.
+
+1. `python -m venv .venv`
+2. `pip install -r requirements.txt`
+3. **`build_keyword_scores.py`** — 사전 필터용 점수 사전 생성
+4. **`npm install && npm run build`** (frontend) — React 화면 빌드
+5. `backend/.env`에 Supabase·Gemini 키 입력
+6. Supabase SQL Editor에서 `backend/database/migrations/*.sql` 실행
+
+> **4번(화면 빌드)을 건너뛰면 구형 단일 HTML로 자동 폴백한다.** 수집은 되지만
+> 보고서·실행 이력·관리자 화면이 없다. `frontend/dist`는 `.gitignore` 대상이라
+> git으로 받은 PC에는 없으므로, **Node.js LTS가 설치돼 있어야 전체 화면을 쓸 수 있다.**
+> (Node 설치가 불가한 PC가 있으면 `dist`를 저장소에 커밋하는 방식으로 바꿔야 한다.)
+
+> ⚠️ **3번을 건너뛰면 사전 필터가 조용히 꺼진 채로 동작한다.**
+> `app/data/keyword_scores.json`은 병무청 학습자료 파생물이라 `.gitignore` 대상이므로
+> git으로 받은 PC에는 존재하지 않는다. 없으면 **모든 글이 Gemini로 가서 API 비용이 급증**한다.
+> 원본 `키워드.xlsx`는 PC마다 위치가 다르므로 아래 중 하나로 지정한다:
+> ```
+> build_keyword_scores.py --xlsx "경로\키워드.xlsx"
+> set KEYWORD_XLSX=경로\키워드.xlsx
+> ```
+> **확인 방법**: `GET /api/health` → `prefilter.enabled`가 `true`인지 본다.
+> `false`면 같은 응답의 `prefilter.warning`에 조치 방법이 들어 있다.
+
+### 학습자료 갱신
+`키워드.xlsx`가 새로 나오면 그 파일로 `build_keyword_scores.py`를 다시 돌리면 된다
+(같은 원본이면 결과도 동일 — 재현 가능). 단 사전이 바뀌면 임계치 근거가 달라지므로
+`validate_prefilter.py`로 재검증할 것. 은어 고정 가중치(`HIGH_SIGNAL`)는 스크립트 안에
+하드코딩되어 있어 **신규 은어 추가는 코드 수정이 필요하다.**
+
 ---
 
 ## 2. 기술 스택
@@ -28,10 +61,10 @@
 | 크롤러 | httpx + BeautifulSoup4 / 네이버 검색 API / YouTube Data API v3 / Meta Graph API / X API v2 / TikTok Research API |
 | 스케줄러 | APScheduler (평일 08:00, `AUTO_CRAWL`로 on/off) |
 | AI 분류 | Google Gemini 2.5 Flash + 키워드 사전필터(`keyword_scorer.py`) |
-| 진행 상태 | 인메모리(`core/progress.py`), 대시보드가 1.5초 폴링 |
+| 진행 상태 | 수집 진행률은 인메모리(`core/progress.py`) · 엑셀 분석 상태·실행 이력은 DB |
 | 엑셀 | openpyxl — 이메일 첨부·서버 저장·다운로드 공통 서식 |
 | 알림 | SMTP 이메일 (엑셀 첨부) |
-| 프론트엔드 | **단일 HTML 대시보드**(`app/dashboard.html`)를 FastAPI가 `/`에 서빙. React는 미착수(`frontend/`는 빈 골격) |
+| 프론트엔드 | **React 19 + Vite + Tailwind**(`frontend/`). FastAPI가 `frontend/dist`를 `/`에 서빙하며, 빌드가 없으면 구형 `app/dashboard.html`로 폴백 |
 | DB | Supabase (PostgreSQL) |
 
 ---
@@ -97,12 +130,35 @@
 | false_reason | text | 판단 이유 |
 | label_l2 | text | 병무청 공식 내용구분 7종 (002 마이그레이션) |
 | subject | text | 과목 15종 (002 마이그레이션) |
-| intent_type / content_type | text | (구버전) label_l2로 대체됨 |
-| department_id | uuid FK | 소관 부서 |
+| category | text | 가이드라인 삭제기준 6종 (006) |
+| action_type | text | 삭제대상 / 비대상 / 종합판단 (006) |
+| intent_type | text | 의도 유형 5종 (006에서 실제 사용 시작) |
+| content_type | text | 내용 유형 5종 (006에서 실제 사용 시작) |
+| department_id | uuid FK | 소관 부서 (1순위) |
+| department_id_2 | uuid FK | 소관 부서 2순위 — 복수 부서 매칭 (006) |
 | response_status | text | 미확인/검토중/대응완료/무관 |
 | response_memo | text | 대응 메모 |
 | alert_sent | bool | 알림 발송 여부 |
 | created_at | timestamp | 수집 시각 |
+
+### batches / articles (엑셀 업로드 분석 — 분류자 계열)
+`batches`(업로드 단위) + `articles`(행별 원문·분석결과). `status`(pending/done/failed)와
+`error_reason`으로 실패분만 재분석할 수 있다. Phase 2에서 `label_l2`·`subject`가 추가돼
+수집분과 같은 필드를 갖는다.
+
+### reclassify_logs (재분류 이력 — 008)
+담당자가 AI 판정을 바꾸면 **바뀐 필드마다 1행**을 남긴다.
+`target_table`/`target_id` · `field` · `old_value` · `new_value` · `reason`(필수) ·
+담당자·계정·PC명 · `created_at`.
+재분류 가능 항목은 코드의 화이트리스트(`services/review.py` `EDITABLE`)로 제한되며,
+목록 밖 컬럼·허용값 밖 값은 거부된다.
+
+### run_logs (실행 이력 — 007)
+`run_type`(crawl/analyze/batch) · `operator_name` · `os_account` · `host_name` ·
+`status` · `collected` · `analyzed` · `started_at`/`finished_at` · `message`.
+
+> ⚠️ 신원 값은 **인증이 아니라 기록**이다. 로그인이 없어 위조 가능하며 부인방지는
+> 성립하지 않는다. 인수인계·업무 파악 용도로만 쓴다.
 
 ### alert_settings (알림 설정)
 | 컬럼 | 타입 | 설명 |
@@ -123,6 +179,9 @@
 | 003_expand_keywords.sql | 키워드 확장(학습자료 기반) |
 | 004_new_sources.sql | 지식인 · 에펨코리아 추가 |
 | 005_sns_sources.sql | 인스타 · X · 틱톡 추가 (is_active=false) |
+| 006_unified_classification.sql | 분류 축 통합 — 수집분에 축 B 컬럼 + `department_id_2`, 업로드분에 축 A 컬럼 |
+| 007_run_logs.sql | 실행 이력 테이블 |
+| 008_review.sql | 검수·재분류 이력 + 업로드분 대응상태 |
 
 ---
 
@@ -131,44 +190,64 @@
 ### 구현됨
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | / | **운영 대시보드**(단일 HTML) |
-| GET | /api/health | 상태 확인 |
-| POST | /api/crawl/run | 수동 수집 실행. body `{source_ids: []}` — 미지정 시 안전 소스만 |
-| GET | /api/crawl/status | 진행 상태(단계·%·수집/분류 건수·출처별·엑셀 경로) |
+| GET | / | **통합 화면**(React 빌드, 없으면 단일 HTML 폴백) |
+| GET | /api/health | 상태 확인 + `prefilter.enabled` |
+| **수집** | | |
+| POST | /api/crawl/run | 수동 수집. body `{source_ids: []}` — 미지정 시 안전 소스만 |
+| GET | /api/crawl/status | 진행 상태(단계·%·건수·출처별·엑셀 경로) |
 | GET | /api/crawl/sources | 소스 목록 + 위험 분류(safe/gray) |
 | GET | /api/crawl/backlog | 미분류 건수 |
-| POST | /api/crawl/analyze | 미분류 백로그 분류. body `{limit}` (기본 100) |
+| POST | /api/crawl/analyze | 미분류 백로그 분류. body `{limit}` |
 | GET | /api/articles | 수집 기사 목록 (필터링) |
 | PATCH | /api/articles/{id}/status | 대응 상태 변경 |
-| GET | /api/articles/export | 결과 엑셀 다운로드 (`scope=today\|all`, `false_level`) |
-| GET | /api/stats | 통계 (누적 집계) |
-| POST | /api/classify/excel | 엑셀 업로드 → 분류 (쿼리 `limit`, 기본 200) |
-| GET | /api/classify/result | 엑셀 분류 진행·결과 |
-| GET | /api/classify/export | 엑셀 분류 결과 다운로드 |
+| GET | /api/articles/export | 결과 엑셀 (`scope=today\|all`) |
+| GET | /api/stats | 통계 (누적) |
+| **엑셀 분석** | | |
+| POST | /api/batches/upload | 엑셀 업로드 → 행 저장 |
+| POST | /api/batches/{id}/analyze | 분석 시작 (미완료·실패 행만 → 실패분 재분석 겸용) |
+| GET | /api/batches | 배치 목록 |
+| GET | /api/batches/{id} | 배치 + 행별 결과 |
+| GET | /api/batches/{id}/stats | 배치 통계 |
+| GET | /api/batches/{id}/download | 결과 엑셀 |
+| **보고서** | | |
+| GET | /api/reports/quarterly/summary | 분기 집계(JSON) — 수집분+업로드분 통합, 중복 제거 내역 포함 |
+| GET | /api/reports/quarterly/download | 분기 보고서 엑셀 |
+| **관리** | | |
+| GET/POST/PUT/DELETE | /api/departments | 부서·키워드 CRUD |
+| GET/PUT | /api/settings | 위험 임계값 |
+| GET/POST/DELETE | /api/docs | RAG 공식문서 |
+| **검수** | | |
+| GET | /api/review/queue | 검수 대상 (수집분+업로드분, 위험도순) |
+| GET | /api/review/fields | 재분류 가능 항목·허용값 |
+| PATCH | /api/review/{table}/{id} | 재분류 + 이력 기록. body `{changes, reason}` |
+| GET | /api/review/history | 전체 재분류 이력 |
+| GET | /api/review/{table}/{id}/history | 항목별 재분류 이력 |
+| **이력** | | |
+| GET/PUT | /api/operator | 담당자 조회·설정 |
+| GET | /api/runs | 최근 실행 이력 |
+| GET | /api/runs/active | 실행 중 작업 |
 
-### 미구현 (대시보드 고도화 시 예정)
+### 미구현
 `GET /api/articles/{id}` 상세 · `/api/sources` CRUD · `/api/alerts` CRUD
 
 ---
 
-## 6. 대시보드 (`/`)
+## 6. 화면 (React 통합, `/`)
 
-탭 2개로 구성. 파일은 `app/dashboard.html` 하나이며 **요청마다 새로 읽으므로 수정 시 새로고침만 하면 반영**된다(서버 재시작 불필요). 파이썬 코드 변경은 재시작 필요.
+Phase 5에서 모니터 대시보드와 분류자 React를 하나로 합쳤다. FastAPI가 `frontend/dist`를
+서빙하며, 빌드가 없으면 구형 `backend/app/dashboard.html`로 폴백한다.
 
-### 탭 ① 실시간 수집
-- **수집 소스 선택** — 안전 소스는 항상 포함(잠금), 회색 소스는 체크 시에만. 경고 문구·확인 팝업·감사 로그.
-- **수동 수집 시작** — 진행률(%)·단계(크롤링 → AI 분류 → 알림) 표시.
-- **미분류 분류** — 백로그 건수 표시, 배치 크기(50/100/300/전체) 선택 후 실행.
-- **카운터** — 이번 수집 / 분류 완료(실제 성공분) / 위험 높음·중간. **모두 실행마다 0으로 초기화**.
-- **출처별 수집** — 이번 실행 기준, 크롤링 중 실시간 갱신.
-- **엑셀** — 완료 시 서버가 파일로 직접 저장(경로 표시) + 수동 다운로드 버튼(오늘/전체/높음만).
+| 탭 | 내용 | 충족 요구 |
+|----|------|----------|
+| **수집** | 소스 선택(안전 자동/회색 opt-in), 수동 수집, 진행률, 출처별 실적, 미분류 분류 | — |
+| **분석하기** | 엑셀 업로드 → 분석 시작 (결과는 DB 저장) | R2 |
+| **결과 목록** | 지난 배치 열람 — 다른 담당자가 올린 것도 보임 | Q2 |
+| **보고서** | 분기 집계 미리보기 + 엑셀 다운로드 (수집분+업로드분 통합) | Q5·R10·R5 |
+| **검수/선정** | AI 판정 재분류(사유 필수) + 이력, 대응상태로 삭제 요청 대상 선정 | **Q3**·Q1 |
+| **실행 이력** | 누가·언제·몇 건 (담당자·계정·PC명) | Q1 |
+| **관리자** | 부서·키워드 CRUD, 위험 임계값, 공식문서 | R1·R6·Q8 |
 
-### 탭 ② 엑셀 분류
-임의의 엑셀(`원문`/`내용` 열)을 올려 **Monitor 분류기를 그대로 재사용**해 분류한다.
-배치 크기(50/200/500/전체) 선택, 진행률, 위험순 결과 목록(점수·척도·내용구분·과목·부서),
-결과 엑셀 저장. 중단(크레딧 소진 등) 시 `중단됨 · N/M건 처리`와 사유를 표시한다.
-
----
+헤더에 담당자 표시·등록. 미등록이면 경고 표시.
 
 ## 7. 환경 변수 (`backend/.env`)
 
@@ -192,63 +271,68 @@
 ## 8. 폴더 구조
 
 ```
-safewatch-monitor/
-├── SPEC.md
-├── backend/
-│   ├── .env                      # 환경 변수 (git 미추적)
-│   ├── requirements.txt
-│   ├── run_monitor.bat           # 실행 런처 (바탕화면 아이콘 대상)
-│   ├── app/
-│   │   ├── main.py               # FastAPI 앱 (stdout UTF-8 고정)
-│   │   ├── dashboard.html        # 운영 대시보드 (단일 HTML)
-│   │   ├── api/
-│   │   │   ├── crawl.py          # 수집·분류·엑셀 API
-│   │   │   ├── dashboard.py      # `/` 대시보드 서빙
-│   │   │   └── health.py
-│   │   ├── core/
-│   │   │   ├── config.py         # 설정(pydantic-settings)
-│   │   │   ├── database.py       # Supabase 클라이언트
-│   │   │   ├── progress.py       # 실행 진행 상태(인메모리)
-│   │   │   └── scheduler.py      # 실행 오케스트레이션 + 소스 위험 분류
-│   │   ├── crawlers/             # naver / youtube / dcinside / fmkorea
-│   │   │   ├── instagram.py · x.py · tiktok.py
-│   │   │   └── storage.py        # 중복 제거 + 일괄 저장
-│   │   ├── data/keyword_scores.json   # 사전필터 점수 사전
-│   │   ├── models/               # (빈 폴더)
-│   │   └── services/
-│   │       ├── analyzer.py           # Gemini 분류
-│   │       ├── classifier_prompt.py  # 병무청 7라벨 프롬프트
-│   │       ├── keyword_scorer.py     # 키워드 사전필터
-│   │       ├── excel_classifier.py   # 업로드 엑셀 분류
-│   │       ├── exporter.py           # 엑셀 조회·생성·파일 저장
-│   │       └── notifier.py           # 이메일 알림 + 엑셀 서식
-│   ├── tests/                    # 파싱·저장·분류 단위 테스트 (네트워크·DB 불필요)
-│   └── database/migrations/      # 001~005 SQL
-├── frontend/                     # (빈 골격 — React 미착수)
-└── docs/                         # (빈 폴더)
+backend/
+  app/
+    main.py                    FastAPI 진입 (stdout UTF-8 고정 — Windows cp949 대응)
+    dashboard.html             구형 단일 화면 (React 빌드 없을 때 폴백)
+    api/                       health · crawl · upload · departments · reports
+                               settings · docs · runs · review · dashboard
+    core/
+      config.py                환경 변수
+      database.py              Supabase 클라이언트
+      scheduler.py             수집 오케스트레이션 + SAFE/GRAY 소스 구분
+      progress.py              수집 진행률 (인메모리)
+      operator.py              담당자 식별 (Windows 계정 + 등록 이름)
+    crawlers/                  naver · youtube · dcinside · fmkorea
+                               instagram · x · tiktok · storage(중복 저장 방지)
+    services/
+      unified_prompt.py        ★ 통합 분류 프롬프트 + 두 축 공통 파서
+      classifier_prompt.py     축 A 라벨·점수구간·과목 정의
+      analyzer.py              수집분 분류
+      keyword_scorer.py        키워드 사전필터 (Gemini 호출 절감)
+      unified_query.py         수집분+업로드분 통합 조회 (중복 제거)
+      review.py                검수·재분류 (허용목록 기반)
+      run_log.py               실행 이력
+      exporter.py / notifier.py  엑셀 산출 · 이메일
+      batch/                   분류자 이식분 — analyzer · excel · stats
+                               app_settings · doc_service(RAG)
+    data/keyword_scores.json   키워드 점수 사전 (gitignore — 설치 시 생성)
+  database/migrations/         001~008 (Supabase SQL Editor에서 순서대로 실행)
+  tests/                       14개 — 네트워크·DB 없이 실행
+  eval/                        골든셋 + 축 B 평가 하네스
+  eval_classifier.py           축 A 평가 (라벨 데이터)
+  validate_prefilter.py        사전필터 임계치 검증
+  validate_news_prefilter.py   언론 구간 안전성 검증
+  build_keyword_scores.py      키워드 사전 생성 (설치 절차 3단계)
+  setup.bat / run_monitor.bat  설치 / 실행
+
+frontend/                      React 19 + Vite + Tailwind
+  src/pages/                   Collect · Upload · BatchList · BatchDetail
+                               Review · Report · Runs · Admin
+  src/api.js                   상대경로 /api — 같은 서버가 서빙하므로 CORS 불필요
+  dist/                        빌드 산출물 (gitignore — 없으면 dashboard.html 폴백)
+
+docs/요구사항_대조.md          사이버조사과 요구 20건 ↔ 구현 대조
 ```
 
----
+> `backend/compare_keyword_effect.py` · `eval_exclude_pilot.py` · `run_classify.py`는
+> 초기 실험용 스크립트로, 현재 운영 경로에서는 쓰이지 않는다(정리 여부 미결).
 
 ## 9. 개발 단계
 
 | 단계 | 내용 | 상태 |
 |------|------|------|
-| 1 | 프로젝트 구조 + SPEC.md | ✅ 완료 |
-| 2 | DB 테이블 생성 (Supabase) | ✅ 완료 (001~005 적용) |
-| 3 | FastAPI 기본 세팅 + 환경설정 | ✅ 완료 |
-| 4 | 네이버 크롤러 (뉴스/블로그/카페/지식인) | ✅ 완료 |
-| 5 | 유튜브 크롤러 | ✅ 완료 |
-| 6 | 디시인사이드 · 에펨코리아 크롤러 | ✅ 완료 |
-| 7 | AI 분류 연동 (Gemini) | ✅ 완료 — 병무청 공식 7라벨 |
-| 8 | APScheduler 자동 스케줄링 | ✅ 완료 — **`AUTO_CRAWL=false`로 비활성(테스트 단계)** |
-| 9 | 이메일 알림 | ✅ 완료 (min_score 필터, 엑셀 첨부) |
-| 10 | 운영 대시보드 UI | ✅ 완료 — 단일 HTML. React 고도화는 미착수 |
-| 11 | SNS 채널 확장 (인스타·X·틱톡) | ✅ 코드 완료 — 자격증명 확보 후 활성화 |
-| 12 | 진행률·엑셀 산출·소스 선택·백로그 분류 | ✅ 완료 |
-| 13 | 회색 소스 법무·정보보안 검토 | ⬜ 대기 (사용자 액션) |
-
----
+| 1~11 | 수집기·분류기·대시보드·SNS 채널·소스 선택·엑셀 산출 | 완료 |
+| 12 | 백로그 소진 기능 | 완료 |
+| 13 | SPEC 갱신 | 완료 |
+| **통합 1** | 분류자 백엔드 흡수 (`app/services/batch/`) | 완료 |
+| **통합 2** | 분류 축 통합 — 1회 호출로 두 축 산출 (006) | 완료 |
+| **통합 3** | 실행 이력 + 엑셀 분석 DB 영속화 (007) | 완료 |
+| **통합 4** | 분기 보고서를 수집분+업로드분 통합 집계로 | 완료 |
+| **통합 5** | React 통합 화면 (7탭) | 완료 |
+| **통합 6** | 검수·재분류 + 이력 (008) | 완료 |
+| **통합 7** | 문서 정리 | 완료 |
+| 남음 | 1년 보관·아카이빙(Q6) · 인증(서버 배포 시) · 회색소스 법무검토(D1) | 미착수 |
 
 ## 10. 분류 체계
 
@@ -262,10 +346,21 @@ safewatch-monitor/
 `keyword_scorer.py`가 Gemini 호출 전에 병역 관련 키워드 점수를 매겨, 임계치 미만이면
 호출 없이 '단순내용'으로 자동 분류한다.
 
-| 대상 | 임계치 | 근거 |
-|------|--------|------|
-| 일반 소스 | 2 | 23~24년 라벨 6,430건 검증 — 조장정보 미스율 0.34% |
-| **언론** | 4 | 라벨 언론 170건 실측 — 중간·높음 언론의 최소 점수가 4라 4까지는 위험 건 미손실 |
+**출처와 무관하게 임계치는 하나(`PREFILTER_THRESHOLD = 2`)만 쓴다** — 요구 Q7
+("언론·SNS·커뮤니티·유튜브 등 출처별로 판단 기준이나 판단 방식은 동일하게 적용").
+
+| 검증 | 스크립트 | 결과 (2026-08-05) |
+|------|---------|------|
+| 임계치 산정 | `validate_prefilter.py` | 사람 라벨 6,430건 — 권장 **2**, 조장 미스율 0.34% |
+| 언론 구간 안전성 | `validate_news_prefilter.py` | 분류된 언론 218건 — 무손실 상한 4, 설정값 2는 **안전** |
+
+언론 검증이 따로 있는 이유: 사람 라벨 자료에는 **출처 구분이 없어**, 언론 구간에서
+위험 기사를 놓치지 않는지를 그 검증만으로는 알 수 없다. 다만 이쪽 정답은 사람 라벨이
+아니라 Gemini 분류 결과이므로 참고 지표로만 본다.
+
+> **이력**: 한때 언론에만 임계치 4를 적용했으나(호출 3.7% 절감), 임계치 2도 2.3%를
+> 절감해 실익 차이가 1.4%p에 불과했다. 요구 Q7과의 상충을 감수할 이유가 없어
+> 2026-08-05 제거하고 단일 임계치로 되돌렸다.
 
 ### 분류 대상 선정
 `analyze_unclassified`는 **최신 저장분부터**(`created_at desc`) 처리한다. 수집 실행은
