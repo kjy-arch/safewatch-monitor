@@ -141,14 +141,21 @@ def _find_depts(names, departments) -> list:
     return ids
 
 
-def _analyze(title: str, text: str, source_type: str, departments: list) -> dict:
+def _analyze(title: str, text: str, source_type: str, departments: list,
+             max_chars: int = 800) -> dict:
+    """한 건을 Gemini로 판정.
+
+    `max_chars`는 프롬프트에 실을 본문 길이 상한이다. 기본 800은 수집분이 검색 API 요약
+    (약 120자)이라 넉넉했던 값이고, 2단계 검증(services/verify.py)은 조회한 본문 전문을
+    넣어야 하므로 더 큰 값을 준다.
+    """
     source_label = {"언론": "언론 기사", "SNS": "SNS 게시물",
                     "커뮤니티": "커뮤니티 게시물", "유튜브": "유튜브 댓글",
                     "지식인": "지식인 질문글"}.get(source_type, "텍스트")
     dept_list = "\n".join(f"- {d['name']}" for d in departments)
 
     system = f"{SYSTEM_PROMPT}\n\n[부서 목록]\n{dept_list}"
-    prompt = f"출처: {source_label}\n제목: {title[:150]}\n내용: {text[:800]}"
+    prompt = f"출처: {source_label}\n제목: {title[:150]}\n내용: {text[:max_chars]}"
 
     # Gemini 호출 — 실패 시 최대 3회 재시도
     for attempt in range(3):

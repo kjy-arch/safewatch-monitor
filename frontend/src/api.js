@@ -213,6 +213,27 @@ export async function getItemHistory(table, id) {
   return res.json()
 }
 
+/* 2단계 검증 — 삭제대상 판정을 본문으로 재확인 (2026-08-07).
+   판정을 덮어쓰지 않는다. 2차 결과를 1차와 나란히 보여주고 최종 판단은 담당자가 한다. */
+export async function getVerifyPending() {
+  const res = await fetch(`${BASE}/verify/pending`)
+  return res.json()
+}
+
+export async function runVerify(limit = 200) {
+  const res = await fetch(`${BASE}/verify/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit }),
+  })
+  return res.json()
+}
+
+export async function getVerifyStatus() {
+  const res = await fetch(`${BASE}/verify/status`)
+  return res.json()
+}
+
 export function articlesExportUrl({ scope = 'today', false_level = '' } = {}) {
   const qs = new URLSearchParams({ scope })
   if (false_level) qs.set('false_level', false_level)
