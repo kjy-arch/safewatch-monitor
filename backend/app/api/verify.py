@@ -14,7 +14,9 @@ router = APIRouter(tags=["verify"])
 @router.post("/verify/run")
 def run_verify(background_tasks: BackgroundTasks, body: dict = Body(default=None)):
     """미확인 삭제대상·종합판단을 본문으로 재판정. 백그라운드 실행."""
-    if verify.status()["running"]:
+    # status() 검사만 하면 run()이 응답 뒤에 실행되는 사이에 두 번째 요청이 통과한다.
+    # 검사·설정을 원자적으로 하는 try_begin()으로 잡는다(중복 실행 실측 2026-08-07).
+    if not verify.try_begin():
         return {"message": "이미 검증이 진행 중입니다."}
     limit = int((body or {}).get("limit") or 200)
     background_tasks.add_task(verify.run, limit)

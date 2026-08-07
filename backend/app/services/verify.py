@@ -11,6 +11,7 @@
 이 모듈은 **한계가 분명하다** — 1차에서 비대상으로 떨어진 글은 보지 않는다. 즉 오탐만
 줄이고 누락은 그대로다. 누락 규모는 `estimate_snippet_miss.py`로 따로 측정한다.
 """
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -32,10 +33,28 @@ REQUEST_DELAY = 0.5
 # 진행 상태 (인메모리). 수집 진행률(core/progress.py)과 섞지 않으려고 따로 둔다.
 _state: dict = {"running": False, "done": 0, "total": 0,
                 "confirmed": 0, "overturned": 0, "failed": 0, "message": ""}
+_lock = threading.Lock()
 
 
 def status() -> dict:
     return dict(_state)
+
+
+def try_begin() -> bool:
+    """실행 권한을 원자적으로 잡는다. 이미 진행 중이면 False.
+
+    API가 status()로 검사만 하고 run()이 BackgroundTask로 **응답 후에** 실행되던 탓에,
+    그 사이(2026-08-07 실측 18ms)에 들어온 두 번째 요청도 running=False를 보고 통과했다.
+    검증이 2회 중복 실행돼 지식인 본문 조회와 Gemini 호출이 두 배로 나갔고, 두 실행이
+    같은 _state를 밟아 run_logs 집계도 실제(유지 14·변경 29)와 어긋난 값이 남았다.
+    검사와 설정을 한 번에 처리해 창을 닫는다.
+    """
+    with _lock:
+        if _state["running"]:
+            return False
+        _state.update({"running": True, "done": 0, "total": 0, "confirmed": 0,
+                       "overturned": 0, "failed": 0, "message": "준비 중..."})
+        return True
 
 
 def pending(limit: int = 200) -> list[dict]:
@@ -54,13 +73,29 @@ def pending(limit: int = 200) -> list[dict]:
 
 
 def run(limit: int = 200) -> dict:
-    """대상 전건을 본문으로 재판정한다. 반환은 요약 통계."""
+    """대상 전건을 본문으로 재판정한다. 반환은 요약 통계.
+
+    API는 try_begin()으로 권한을 먼저 잡고 부른다. 직접 호출(테스트·스크립트)도 되도록
+    아직 안 잡혔으면 여기서 잡는다.
+    """
+    if not _state["running"] and not try_begin():
+        return status()
+    try:
+        _run(limit)
+    finally:
+        # 중간에 예외가 나가도 플래그를 풀어야 한다. 안 그러면 다시는 실행할 수 없다.
+        _state["running"] = False
+    # 스냅샷은 플래그를 푼 뒤에 뜬다 — 호출자가 running=False를 보고 종료를 판단한다.
+    return status()
+
+
+def _run(limit: int) -> dict:
     rows = pending(limit)
     run_id = run_log.start("verify")
-    _state.update({"running": True, "done": 0, "total": len(rows),
+    _state.update({"done": 0, "total": len(rows),
                    "confirmed": 0, "overturned": 0, "failed": 0, "message": ""})
     if not rows:
-        _state.update({"running": False, "message": "확인할 대상이 없습니다."})
+        _state["message"] = "확인할 대상이 없습니다."
         run_log.finish(run_id, analyzed=0, message="대상 없음")
         return status()
 
@@ -111,7 +146,6 @@ def run(limit: int = 200) -> dict:
         finally:
             time.sleep(REQUEST_DELAY)
 
-    _state["running"] = False
     _state["message"] = (f"{_state['total']}건 확인 — 유지 {_state['confirmed']} · "
                          f"변경 {_state['overturned']} · 실패 {_state['failed']}")
     print(f"[검증] {_state['message']}", flush=True)

@@ -129,6 +129,31 @@ for target_id, fields in updates.items():
     bad = [c for c in PROTECTED if c in fields]
     check(f"{target_id}: 원 분류 미변경", not bad, f"덮어쓴 컬럼 {bad}")
 
+print("[6] 중복 실행 차단 (2026-08-07 실측 회귀)")
+# API가 status()만 검사하던 때, run()이 BackgroundTask로 응답 뒤에 도는 사이 두 번째
+# 요청도 running=False를 보고 통과해 검증이 2회 돌았다(18ms 차). 조회·Gemini 비용이
+# 두 배로 나갔고 두 실행이 같은 _state를 밟아 집계까지 어긋났다.
+verify._state["running"] = False
+check("첫 요청은 권한을 잡는다", verify.try_begin() is True)
+check("잡은 뒤 running=True", verify._state["running"] is True)
+check("★ 두 번째 요청은 거절된다", verify.try_begin() is False)
+
+# 예외가 나가도 플래그가 풀려야 다음 실행이 가능하다
+verify._state["running"] = False
+def _boom(_limit):
+    raise RuntimeError("의도된 실패")
+_saved, verify._run = verify._run, _boom
+try:
+    verify.run(limit=1)
+    check("예외 전파", False, "예외가 삼켜졌다")
+except RuntimeError:
+    check("예외 전파", True)
+finally:
+    verify._run = _saved
+check("★ 예외 후 running 해제", verify._state["running"] is False)
+check("해제 후 재실행 가능", verify.try_begin() is True)
+verify._state["running"] = False
+
 print()
 if failures:
     print(f"FAILED: {failures}")
