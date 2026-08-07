@@ -1,0 +1,4 @@
+# 화면 빌드 산출물은 줄바꿈 변환 대상이 아니다.
+# core.autocrlf=true 인 PC에서 체크아웃하면 빌드 결과와 바이트가 달라져
+# 재빌드 때마다 의미 없는 diff가 생긴다.
+frontend/dist/** -text
