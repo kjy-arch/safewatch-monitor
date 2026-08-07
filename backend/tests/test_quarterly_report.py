@@ -93,6 +93,18 @@ print("\n[빈 데이터]")
 wb2 = openpyxl.load_workbook(BytesIO(build_quarterly_excel([], DEPTS, "기간")))
 check("데이터 없어도 생성됨", "요약" in wb2.sheetnames)
 
+print("\n[분기 보고서 수식 삽입 방지]")
+malicious = [dict(ARTICLES[0], source_type="=HYPERLINK(\"https://evil.test\")")]
+wb3 = openpyxl.load_workbook(BytesIO(build_quarterly_excel(malicious, DEPTS, "기간")), data_only=False)
+formula_cells = [
+    cell.coordinate
+    for ws3 in wb3.worksheets
+    for row in ws3.iter_rows()
+    for cell in row
+    if cell.data_type == "f"
+]
+check("모든 시트에 외부 입력 수식 없음", not formula_cells, f"formula cells: {formula_cells}")
+
 print()
 if failures:
     print(f"FAILED ({len(failures)}): {failures}")

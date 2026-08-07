@@ -5,12 +5,12 @@ import { getQuarterlySummary, quarterlyDownloadUrl } from '../api'
    엑셀을 내려받기 전에 집계를 화면에서 먼저 확인할 수 있게 한다. */
 
 function isoDate(d) { return d.toISOString().slice(0, 10) }
+const DEFAULT_TO = isoDate(new Date())
+const DEFAULT_FROM = isoDate(new Date(Date.now() - 90 * 86400000))
 
 export default function ReportPage() {
-  const today = new Date()
-  const quarterAgo = new Date(today.getTime() - 90 * 86400000)
-  const [from, setFrom] = useState(isoDate(quarterAgo))
-  const [to, setTo] = useState(isoDate(today))
+  const [from, setFrom] = useState(DEFAULT_FROM)
+  const [to, setTo] = useState(DEFAULT_TO)
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
@@ -22,7 +22,13 @@ export default function ReportPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])   // 첫 진입 시 최근 3개월
+  useEffect(() => {
+    let active = true
+    getQuarterlySummary(DEFAULT_FROM, DEFAULT_TO)
+      .then(result => { if (active) setData(result) })
+      .catch(e => { if (active) setErr(e.message) })
+    return () => { active = false }
+  }, []) // 첫 진입 시 최근 3개월
 
   return (
     <div className="space-y-6">

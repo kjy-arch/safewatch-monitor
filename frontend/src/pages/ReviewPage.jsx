@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getReviewQueue, getEditableFields, reclassify, getItemHistory,
   getVerifyPending, runVerify, getVerifyStatus,
@@ -26,13 +26,12 @@ export default function ReviewPage() {
   const [editing, setEditing] = useState(null)
   const [msg, setMsg] = useState('')
 
-  useEffect(() => { getEditableFields().then(setFields).catch(() => {}) }, [])
-  useEffect(() => { load() }, [filter])
-
-  function load() {
-    setRows(null)
+  const load = useCallback(() => {
     getReviewQueue(filter).then(setRows).catch(() => setRows([]))
-  }
+  }, [filter])
+
+  useEffect(() => { getEditableFields().then(setFields).catch(() => {}) }, [])
+  useEffect(() => { load() }, [load])
 
   return (
     <div className="space-y-4">
@@ -102,7 +101,7 @@ function EditForm({ row, fields, onDone }) {
 
   useEffect(() => {
     getItemHistory(row.table, row.id).then(setHist).catch(() => setHist([]))
-  }, [row.id])
+  }, [row.id, row.table])
 
   const EDITABLE = ['action_type', 'category', 'label_l2', 'subject',
                     'intent_type', 'content_type', 'false_level', 'response_status']

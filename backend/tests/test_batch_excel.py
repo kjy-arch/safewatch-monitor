@@ -2,6 +2,7 @@
 
 실행: .venv\\Scripts\\python.exe tests\\test_batch_excel.py
 """
+import asyncio
 import os, sys
 from io import BytesIO
 
@@ -13,7 +14,14 @@ for k in ("SUPABASE_URL", "SUPABASE_SECRET_KEY", "GEMINI_API_KEY",
     os.environ.setdefault(k, "dummy" if "URL" not in k else "https://dummy.supabase.co")
 
 import openpyxl
-from app.services.batch.excel import parse_excel
+from fastapi import HTTPException, UploadFile
+from app.api.upload import upload_excel
+from app.services.batch.excel import (
+    MAX_DATA_ROWS,
+    MAX_UPLOAD_BYTES,
+    build_result_excel,
+    parse_excel,
+)
 
 failures = []
 
@@ -67,6 +75,66 @@ check("빈 행 제외", len(rows) == 1, f"got {len(rows)}")
 rows = parse_excel(build([["원문", "출처"], [BODY, "이상한출처"]]))
 check("알 수 없는 출처는 '언론'으로", rows and rows[0]["source_type"] == "언론",
       f"got {rows[0]['source_type'] if rows else None!r}")
+
+print("\n[업로드 제한]")
+try:
+    parse_excel(b"")
+    check("빈 파일 거부", False, "예외가 발생하지 않음")
+except ValueError as e:
+    check("빈 파일 거부", "빈 파일" in str(e), str(e))
+
+try:
+    parse_excel(b"not an xlsx")
+    check("잘못된 형식 거부", False, "예외가 발생하지 않음")
+except ValueError as e:
+    check("잘못된 형식 거부", ".xlsx" in str(e), str(e))
+
+try:
+    parse_excel(b"x" * (MAX_UPLOAD_BYTES + 1))
+    check("10MB 초과 거부", False, "예외가 발생하지 않음")
+except ValueError as e:
+    check("10MB 초과 거부", "10MB" in str(e), str(e))
+
+boundary_rows = [["원문"]] + [[f"본문 {i}"] for i in range(MAX_DATA_ROWS)]
+check("1,000행 경계 허용", len(parse_excel(build(boundary_rows))) == MAX_DATA_ROWS)
+try:
+    parse_excel(build(boundary_rows + [["초과 행"]]))
+    check("1,001행 거부", False, "예외가 발생하지 않음")
+except ValueError as e:
+    check("1,001행 거부", "1,000행" in str(e), str(e))
+
+print("\n[수식 삽입 방지 — 배치 결과]")
+xlsx = build_result_excel(
+    [{"text": "=HYPERLINK(\"https://evil.test\")", "source_type": "+CMD", "source_url": "@SUM(1,1)"}],
+    [{"false_reason": "  -1+1"}],
+)
+ws = openpyxl.load_workbook(BytesIO(xlsx), data_only=False).active
+check("원문을 일반 텍스트로 저장", ws["A2"].data_type != "f" and ws["A2"].value.startswith("'="))
+check("출처를 일반 텍스트로 저장", ws["B2"].data_type != "f" and ws["B2"].value.startswith("'+"))
+check("URL을 일반 텍스트로 저장", ws["C2"].data_type != "f" and ws["C2"].value.startswith("'@"))
+check("앞 공백 뒤 수식 문자도 차단", ws["H2"].data_type != "f" and ws["H2"].value.startswith("'  -"))
+
+print("\n[업로드 API 오류]")
+
+
+async def call_upload(filename, content):
+    return await upload_excel(UploadFile(BytesIO(content), filename=filename))
+
+
+for filename, content, expected_status, expected_detail in [
+    ("legacy.xls", b"x", 400, ".xlsx"),
+    ("fake.xlsx", b"not an xlsx", 422, "유효한 .xlsx"),
+    ("empty.xlsx", b"", 422, "빈 파일"),
+    # 정확히 10MB면 용량 초과(413)가 아니라 다음 형식 검증(422)까지 진행해야 한다.
+    ("size-boundary.xlsx", b"x" * MAX_UPLOAD_BYTES, 422, "유효한 .xlsx"),
+    ("large.xlsx", b"x" * (MAX_UPLOAD_BYTES + 1), 413, "10MB"),
+]:
+    try:
+        asyncio.run(call_upload(filename, content))
+        check(f"{filename} 거부", False, "예외가 발생하지 않음")
+    except HTTPException as e:
+        check(f"{filename} 거부", e.status_code == expected_status and expected_detail in e.detail,
+              f"status={e.status_code}, detail={e.detail}")
 
 print()
 if failures:

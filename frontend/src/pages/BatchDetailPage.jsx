@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { getBatch, getBatchStats, getDepartments, downloadUrl } from '../api'
 
 const LEVEL_STYLE = {
@@ -30,14 +30,6 @@ const INTENT_STYLE = {
   '불명확':      'bg-gray-100 text-gray-500',
 }
 
-const CONTENT_STYLE = {
-  '사실관계 오류': 'bg-red-50 text-red-600',
-  '과장/왜곡':    'bg-orange-50 text-orange-600',
-  '출처 불명':    'bg-yellow-50 text-yellow-600',
-  '맥락 누락':    'bg-blue-50 text-blue-600',
-  '문제없음':     'bg-green-50 text-green-600',
-}
-
 function DistCard({ title, counts, order, styleMap }) {
   const map = counts || {}
   const entries = order
@@ -65,9 +57,7 @@ export default function BatchDetailPage({ batchId, onBack }) {
   const [deptMap, setDeptMap] = useState({})
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { load() }, [batchId])
-
-  async function load() {
+  const load = useCallback(async function loadBatch() {
     setLoading(true)
     const result = await getBatch(batchId)
     setData(result)
@@ -81,9 +71,11 @@ export default function BatchDetailPage({ batchId, onBack }) {
     }
     setLoading(false)
     if (result.batch.analyzed_rows < result.batch.total_rows) {
-      setTimeout(() => load(), 5000)
+      setTimeout(loadBatch, 5000)
     }
-  }
+  }, [batchId])
+
+  useEffect(() => { load() }, [load])
 
   if (loading) return <p className="text-center text-gray-400 py-16">불러오는 중...</p>
   if (!data) return null

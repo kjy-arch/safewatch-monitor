@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 
 from app.core.config import settings
 from app.core.database import supabase
+from app.services.excel_safety import sanitize_workbook
 
 
 # ── 엑셀 생성 ─────────────────────────────────────────────
@@ -117,6 +118,7 @@ def _build_excel(articles: list) -> bytes:
     ws.freeze_panes = "A3"
     ws.auto_filter.ref = f"A2:L{len(articles) + 2}"
 
+    sanitize_workbook(wb)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -196,9 +198,30 @@ def _summary_html(articles: list, today_str: str) -> str:
 </body></html>"""
 
 
+def _is_alert_candidate(article: dict, min_score: int) -> bool:
+    """점수뿐 아니라 최종 조치유형과 2차 검증 결과까지 반영한다.
+
+    2차 확인이 끝난 글은 verify_action을 우선한다. 본문 조회에 실패한 글은 확인되지 않은
+    상태이므로 자동 알림에서 제외한다. 아직 2차 확인 전이거나 조회 대상이 아닌 글은 현재
+    조치유형을 사용한다.
+    """
+    if min_score > 0 and (article.get("false_score") or -1) < min_score:
+        return False
+
+    verify_status = article.get("verify_status")
+    if verify_status == "조회실패":
+        return False
+    action_type = (
+        article.get("verify_action")
+        if verify_status == "확인완료"
+        else article.get("action_type")
+    )
+    return action_type == "삭제대상"
+
+
 # ── 발송 메인 ─────────────────────────────────────────────
 def send_alerts():
-    """당일 수집 기사를 수신자별 min_score 기준으로 필터링해 엑셀 첨부 발송."""
+    """당일 삭제대상 기사를 점수·2차 검증 결과로 필터링해 엑셀 첨부 발송."""
     recipients = (
         supabase.table("alert_settings")
         .select("email, min_score")
@@ -238,9 +261,7 @@ def send_alerts():
     for r in recipients:
         ms = r.get("min_score") or 0
         if ms not in cache:
-            filtered = articles if ms <= 0 else [
-                a for a in articles if (a.get("false_score") or -1) >= ms
-            ]
+            filtered = [a for a in articles if _is_alert_candidate(a, ms)]
             cache[ms] = (
                 filtered,
                 _build_excel(filtered) if filtered else None,

@@ -10,6 +10,7 @@ from app.services.batch.doc_service import find_relevant_docs
 # Phase 2 — 수집분/업로드분이 같은 프롬프트·파서를 쓰도록 통합
 from app.services.unified_prompt import SYSTEM_PROMPT, parse_unified
 from app.services.keyword_scorer import has_military_context
+from app.services.pii_masking import mask_pii
 
 PARALLEL_WORKERS = 5           # 동시 Gemini API 호출 수 (10에서 축소 — Windows httpx 동시연결 폭주 시 WinError 10035 완화)
 SUPABASE_PAGE_SIZE = 1000      # Supabase 페이지당 조회 건수
@@ -243,6 +244,7 @@ def _analyze_single(text: str, source_type: str, departments: list,
         f"출처: {source_label}\n"
         f"텍스트: {text}"
     )
+    prompt = mask_pii(prompt)
 
     for attempt in range(AI_MAX_RETRY):
         try:

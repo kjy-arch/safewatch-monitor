@@ -10,6 +10,7 @@ from app.services.keyword_scorer import (
     score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD,
     has_military_context,
 )
+from app.services.pii_masking import mask_pii
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
@@ -154,8 +155,10 @@ def _analyze(title: str, text: str, source_type: str, departments: list,
                     "지식인": "지식인 질문글"}.get(source_type, "텍스트")
     dept_list = "\n".join(f"- {d['name']}" for d in departments)
 
-    system = f"{SYSTEM_PROMPT}\n\n[부서 목록]\n{dept_list}"
-    prompt = f"출처: {source_label}\n제목: {title[:150]}\n내용: {text[:max_chars]}"
+    system = mask_pii(f"{SYSTEM_PROMPT}\n\n[부서 목록]\n{dept_list}")
+    prompt = mask_pii(
+        f"출처: {source_label}\n제목: {title[:150]}\n내용: {text[:max_chars]}"
+    )
 
     # Gemini 호출 — 실패 시 최대 3회 재시도
     for attempt in range(3):

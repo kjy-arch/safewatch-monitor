@@ -41,7 +41,7 @@ export default function UploadPage({ onComplete }) {
       <div className="bg-white rounded-xl shadow p-8">
         <h2 className="text-2xl font-bold text-gray-800 mb-2">엑셀 업로드</h2>
         <p className="text-gray-500 text-sm mb-6">
-          분석할 텍스트가 담긴 엑셀 파일을 업로드하세요.
+          분석할 텍스트가 담긴 .xlsx 파일을 업로드하세요. (최대 10MB·데이터 1,000행)
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -54,7 +54,7 @@ export default function UploadPage({ onComplete }) {
             <input
               ref={inputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx"
               className="hidden"
               onChange={e => setFile(e.target.files[0])}
             />
@@ -67,7 +67,7 @@ export default function UploadPage({ onComplete }) {
               <div>
                 <p className="text-gray-400 text-4xl mb-2">📂</p>
                 <p className="text-gray-500">클릭하여 엑셀 파일 선택</p>
-                <p className="text-gray-400 text-xs mt-1">.xlsx, .xls 파일</p>
+                <p className="text-gray-400 text-xs mt-1">.xlsx 파일 · 최대 10MB · 데이터 1,000행</p>
               </div>
             )}
           </div>
@@ -93,6 +93,7 @@ export default function UploadPage({ onComplete }) {
 
         <div className="mt-6 bg-gray-50 rounded-lg p-4 text-xs text-gray-500 space-y-2">
           <p className="font-medium text-gray-600">엑셀 형식 안내</p>
+          <p>• <span className="font-medium text-gray-600">업로드 제한</span> — .xlsx 파일, 최대 10MB, 유효 데이터 1,000행</p>
           <p>• <span className="font-medium text-gray-600">컬럼명 자유</span> — 기존 엑셀 그대로 사용 가능. 내용·텍스트·본문·기사내용 등 자동 인식</p>
           <p>• <span className="font-medium text-gray-600">컬럼명 없어도 OK</span> — 첫 번째 열을 원문으로 자동 처리</p>
           <p>• <span className="font-medium text-gray-600">출처 구분값</span> — 언론 · SNS · 커뮤니티 · 유튜브 (없거나 다른 값이면 "언론"으로 처리)</p>

@@ -71,18 +71,27 @@ print("[2] min_score 필터")
 
 ARTICLES = [
     {"id": "a66", "false_score": 66, "false_level": "중간", "source_type": "커뮤니티",
-     "title": "t66", "content": "c66", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "삭제대상", "title": "t66", "content": "c66", "url": "u", "published_at": "2026-07-04T01:00:00"},
     {"id": "a67", "false_score": 67, "false_level": "높음", "source_type": "커뮤니티",
-     "title": "t67", "content": "c67", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "삭제대상", "title": "t67", "content": "c67", "url": "u", "published_at": "2026-07-04T01:00:00"},
     {"id": "a68", "false_score": 68, "false_level": "높음", "source_type": "언론",
-     "title": "t68", "content": "c68", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "비대상", "title": "t68", "content": "c68", "url": "u", "published_at": "2026-07-04T01:00:00"},
     {"id": "aNone", "false_score": None, "false_level": None, "source_type": "유튜브",
-     "title": "tN", "content": "cN", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "삭제대상", "title": "tN", "content": "cN", "url": "u", "published_at": "2026-07-04T01:00:00"},
+    {"id": "verified-safe", "false_score": 90, "false_level": "높음", "source_type": "지식인",
+     "action_type": "삭제대상", "verify_status": "확인완료", "verify_action": "비대상",
+     "title": "safe", "content": "safe", "url": "u", "published_at": "2026-07-04T01:00:00"},
+    {"id": "verified-delete", "false_score": 91, "false_level": "높음", "source_type": "지식인",
+     "action_type": "종합판단", "verify_status": "확인완료", "verify_action": "삭제대상",
+     "title": "delete", "content": "delete", "url": "u", "published_at": "2026-07-04T01:00:00"},
+    {"id": "verify-failed", "false_score": 92, "false_level": "높음", "source_type": "언론",
+     "action_type": "삭제대상", "verify_status": "조회실패",
+     "title": "failed", "content": "failed", "url": "u", "published_at": "2026-07-04T01:00:00"},
 ]
 
 RECIPIENTS = [
-    {"email": "boundary@t.kr", "min_score": 67},   # 67, 68 두 건
-    {"email": "all@t.kr",      "min_score": 0},    # 전체 4건
+    {"email": "boundary@t.kr", "min_score": 67},
+    {"email": "all@t.kr",      "min_score": 0},
     {"email": "none@t.kr",     "min_score": 100},  # 0건 → 발송 생략
 ]
 
@@ -128,20 +137,23 @@ notifier.send_alerts()
 check("발송 대상 2명 (100점 기준자는 생략)",
       captured["sends"] == ["boundary@t.kr", "all@t.kr"], f"got {captured['sends']}")
 check("alert_sent는 발송된 기사만",
-      captured["updates"] == [["a66", "a67", "a68", "aNone"]], f"got {captured['updates']}")
+      captured["updates"] == [["a66", "a67", "aNone", "verified-delete"]], f"got {captured['updates']}")
 
 captured["updates"].clear()
 captured["sends"].clear()
 RECIPIENTS[:] = [{"email": "boundary@t.kr", "min_score": 67}]
 notifier.send_alerts()
 check("경계: 67 포함(>=), 66·미분류 제외",
-      captured["updates"] == [["a67", "a68"]], f"got {captured['updates']}")
+      captured["updates"] == [["a67", "verified-delete"]], f"got {captured['updates']}")
 
 captured["updates"].clear()
 RECIPIENTS[:] = [{"email": "x@t.kr", "min_score": 1}]
 notifier.send_alerts()
 check("min_score=1: 미분류(None) 제외",
-      captured["updates"] == [["a66", "a67", "a68"]], f"got {captured['updates']}")
+      captured["updates"] == [["a66", "a67", "verified-delete"]], f"got {captured['updates']}")
+
+check("비대상·2차 비대상·조회실패는 자동 알림 제외",
+      all(x not in captured["updates"][-1] for x in ["a68", "verified-safe", "verify-failed"]))
 
 notifier._send = _real_send
 
@@ -188,6 +200,16 @@ legacy = [dict(rows[0], dept1=None, dept2=None, departments={"name": "홍보과"
 ws2 = openpyxl.load_workbook(io.BytesIO(notifier._build_excel(legacy))).active
 c2 = dict(zip([c.value for c in ws2[2]], [c.value for c in ws2[3]]))
 check("구버전 departments 키 폴백", c2.get("소관부서") == "홍보과", f"got {c2.get('소관부서')}")
+
+malicious = [dict(rows[0], title="=HYPERLINK(\"https://evil.test\")",
+                  content="  +CMD", url="@SUM(1,1)", false_reason="-1+1")]
+mw = openpyxl.load_workbook(io.BytesIO(notifier._build_excel(malicious)), data_only=False).active
+mh = [c.value for c in mw[2]]
+mcells = dict(zip(mh, mw[3]))
+for column, prefix in [("제목", "'="), ("원문", "'  +"), ("링크", "'@"), ("판단이유", "'-")]:
+    check(f"{column} 수식 삽입 방지",
+          mcells[column].data_type != "f" and mcells[column].value.startswith(prefix),
+          f"got {mcells[column].value!r} ({mcells[column].data_type})")
 
 print()
 if failures:
