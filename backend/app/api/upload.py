@@ -3,7 +3,11 @@ from fastapi.responses import StreamingResponse
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from app.core.database import supabase
-from app.services.batch.excel import parse_excel, build_result_excel
+from app.services.batch.excel import (
+    MAX_UPLOAD_BYTES,
+    parse_excel,
+    build_result_excel,
+)
 from app.services.batch.analyzer import analyze_batch
 from app.services.batch.stats import summarize
 from app.services.batch.app_settings import get_risk_threshold
@@ -46,10 +50,13 @@ def _ordered_articles(batch_id: str, columns: str = "*") -> list[dict]:
 
 @router.post("/upload")
 async def upload_excel(file: UploadFile = File(...)):
-    if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.")
+    filename = file.filename or ""
+    if not filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="엑셀 파일(.xlsx)만 업로드 가능합니다.")
 
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="파일 크기는 10MB 이하여야 합니다.")
 
     try:
         rows = parse_excel(content)
@@ -61,7 +68,7 @@ async def upload_excel(file: UploadFile = File(...)):
 
     # batches 테이블에 배치 생성
     batch = supabase.table("batches").insert({
-        "file_name": file.filename,
+        "file_name": filename,
         "total_rows": len(rows),
         "analyzed_rows": 0,
     }).execute().data[0]
@@ -96,7 +103,7 @@ async def upload_excel(file: UploadFile = File(...)):
 
     return {
         "batch_id": batch["id"],
-        "file_name": file.filename,
+        "file_name": filename,
         "total_rows": len(rows),
         "message": f"{len(rows)}행 업로드 완료. /api/batches/{batch['id']}/analyze 로 분석을 시작하세요.",
     }

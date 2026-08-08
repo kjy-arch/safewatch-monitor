@@ -40,6 +40,34 @@ for t in ["초6여아 갈수록 키가안자라는데 문제일까요?", "2026�
 check("빈 문자열은 무관", not scorer.has_military_context(""))
 check("None도 안전", not scorer.has_military_context(None))
 
+# ── 난독 해제 (2026-08-07) ──
+# 조장 글은 구분자 삽입(병.역.면.제)과 zero-width로 키워드 필터를 회피한다. 원문만
+# 비교하던 때는 그런 글이 게이트를 못 넘고 analyzer가 '비대상'으로 확정한 뒤 Gemini에
+# 보내지 않았다 — 삭제요청 선정에서 조용히 빠지는 경로였다.
+print("[0b] 난독 해제 게이트")
+for t in ["병.역.면.제", "병 역 면 제", "병.역", "군.대", "면_탈", "공 익",
+          "병​역", "４급", "신.체.검.사"]:
+    check(f"난독화 통과: {t}", scorer.has_military_context(t))
+
+# 압축 매칭의 대가 — 어절 경계를 넘는 오탐. 실측 1건/1,485건(0.07%)이라 감수했다.
+# 게이트 오탐은 Gemini 호출 1건이고 누락은 조장 글 유실이라 비대칭이 크기 때문이다.
+# **의도된 동작이므로 고정한다** — 이 두 줄이 깨지면 설계가 바뀐 것이니 근거부터 확인할 것.
+check("허용된 경계 오탐: '그러면 제가'->면제",
+      scorer.has_military_context("그러면 제가 갈게요"))
+check("허용된 경계 오탐: '수입 대비'->입대",
+      scorer.has_military_context("오늘 수입 대비 지출이 많다"))
+
+# ── 사전 압축 매칭은 길이 3 이상만 ──
+# 사전에는 일상어 2음절이 많아(의지·생계·의사·장기·수사) 압축하면 경계 오탐이 쏟아진다.
+# 게이트와 달리 길이 제한을 둔 이유. 근거는 keyword_scorer.py 상단 주석.
+print("[0c] 사전 압축 매칭 범위")
+scorer._scores = {"병역면제": 6, "공익": 4}
+check("3음절 난독화는 가산", scorer.score_text("병.역.면.제 방법") == 6,
+      f"got {scorer.score_text('병.역.면.제 방법')}")
+check("2음절 난독화는 미가산", scorer.score_text("공 익 가고싶다") == 0,
+      f"got {scorer.score_text('공 익 가고싶다')}")
+check("2음절 원문은 그대로 가산", scorer.score_text("공익 가고싶다") == 4)
+scorer._scores = {"공익": 4, "면제": 4, "정공": 8}
 
 check("매칭 합산", scorer.score_text("정공으로 공익 갈까") == 12)
 check("무관 텍스트 0점", scorer.score_text("오늘 점심 뭐 먹지") == 0)

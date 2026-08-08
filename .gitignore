@@ -4,13 +4,14 @@ __pycache__/
 .venv/
 node_modules/
 dist/
+# 예외: 화면 빌드 산출물은 커밋한다(285KB). 설치 PC에 Node.js가 없어도 React 화면이
+# 뜨게 하려는 것 — 없으면 api/dashboard.py가 구 단일 HTML로 조용히 폴백한다.
+# 소스(frontend/src)를 고치면 `npm run build` 후 dist도 함께 커밋해야 한다.
+!frontend/dist/
 .DS_Store
 *.log
 eval_result_*.csv
-keyword_baseline.json
 backend/app/data/keyword_scores.json
 
-# 초기 실험용 스크립트 (운영 경로 미사용, 커밋 대상 아님)
-backend/check_dates.py
-backend/test_full.py
-migrations.code-workspace
+# 기관 보고서 원고 — 저장소가 공개(public)이므로 커밋 금지
+보고서용 폴더/

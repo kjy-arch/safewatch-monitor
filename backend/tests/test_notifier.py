@@ -71,18 +71,27 @@ print("[2] min_score 필터")
 
 ARTICLES = [
     {"id": "a66", "false_score": 66, "false_level": "중간", "source_type": "커뮤니티",
-     "title": "t66", "content": "c66", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "삭제대상", "title": "t66", "content": "c66", "url": "u", "published_at": "2026-07-04T01:00:00"},
     {"id": "a67", "false_score": 67, "false_level": "높음", "source_type": "커뮤니티",
-     "title": "t67", "content": "c67", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "삭제대상", "title": "t67", "content": "c67", "url": "u", "published_at": "2026-07-04T01:00:00"},
     {"id": "a68", "false_score": 68, "false_level": "높음", "source_type": "언론",
-     "title": "t68", "content": "c68", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "비대상", "title": "t68", "content": "c68", "url": "u", "published_at": "2026-07-04T01:00:00"},
     {"id": "aNone", "false_score": None, "false_level": None, "source_type": "유튜브",
-     "title": "tN", "content": "cN", "url": "u", "published_at": "2026-07-04T01:00:00"},
+     "action_type": "삭제대상", "title": "tN", "content": "cN", "url": "u", "published_at": "2026-07-04T01:00:00"},
+    {"id": "verified-safe", "false_score": 90, "false_level": "높음", "source_type": "지식인",
+     "action_type": "삭제대상", "verify_status": "확인완료", "verify_action": "비대상",
+     "title": "safe", "content": "safe", "url": "u", "published_at": "2026-07-04T01:00:00"},
+    {"id": "verified-delete", "false_score": 91, "false_level": "높음", "source_type": "지식인",
+     "action_type": "종합판단", "verify_status": "확인완료", "verify_action": "삭제대상",
+     "title": "delete", "content": "delete", "url": "u", "published_at": "2026-07-04T01:00:00"},
+    {"id": "verify-failed", "false_score": 92, "false_level": "높음", "source_type": "언론",
+     "action_type": "삭제대상", "verify_status": "조회실패",
+     "title": "failed", "content": "failed", "url": "u", "published_at": "2026-07-04T01:00:00"},
 ]
 
 RECIPIENTS = [
-    {"email": "boundary@t.kr", "min_score": 67},   # 67, 68 두 건
-    {"email": "all@t.kr",      "min_score": 0},    # 전체 4건
+    {"email": "boundary@t.kr", "min_score": 67},
+    {"email": "all@t.kr",      "min_score": 0},
     {"email": "none@t.kr",     "min_score": 100},  # 0건 → 발송 생략
 ]
 
@@ -128,20 +137,23 @@ notifier.send_alerts()
 check("발송 대상 2명 (100점 기준자는 생략)",
       captured["sends"] == ["boundary@t.kr", "all@t.kr"], f"got {captured['sends']}")
 check("alert_sent는 발송된 기사만",
-      captured["updates"] == [["a66", "a67", "a68", "aNone"]], f"got {captured['updates']}")
+      captured["updates"] == [["a66", "a67", "aNone", "verified-delete"]], f"got {captured['updates']}")
 
 captured["updates"].clear()
 captured["sends"].clear()
 RECIPIENTS[:] = [{"email": "boundary@t.kr", "min_score": 67}]
 notifier.send_alerts()
 check("경계: 67 포함(>=), 66·미분류 제외",
-      captured["updates"] == [["a67", "a68"]], f"got {captured['updates']}")
+      captured["updates"] == [["a67", "verified-delete"]], f"got {captured['updates']}")
 
 captured["updates"].clear()
 RECIPIENTS[:] = [{"email": "x@t.kr", "min_score": 1}]
 notifier.send_alerts()
 check("min_score=1: 미분류(None) 제외",
-      captured["updates"] == [["a66", "a67", "a68"]], f"got {captured['updates']}")
+      captured["updates"] == [["a66", "a67", "verified-delete"]], f"got {captured['updates']}")
+
+check("비대상·2차 비대상·조회실패는 자동 알림 제외",
+      all(x not in captured["updates"][-1] for x in ["a68", "verified-safe", "verify-failed"]))
 
 notifier._send = _real_send
 
@@ -182,12 +194,31 @@ check("1순위 부서", cell.get("소관부서") == "병역조사과", f"got {ce
 check("2순위 부서(요구 Q4)", cell.get("소관부서2") == "병역판정검사과", f"got {cell.get('소관부서2')}")
 check("제목 채워짐(요구 R2)", cell.get("제목") == "5급 받는 법", f"got {cell.get('제목')}")
 check("조치유형 채워짐", cell.get("조치유형") == "삭제대상", f"got {cell.get('조치유형')}")
+check("내용유형 값 보존", cell.get("내용유형") == "과장/왜곡",
+      f"got {cell.get('내용유형')}")
+link_cell = ws.cell(row=3, column=hdr.index("링크") + 1)
+check("링크 열에 URL 표시", link_cell.value == "http://t.test/1", f"got {link_cell.value!r}")
+check("링크 열 실제 URL", link_cell.hyperlink is not None
+      and link_cell.hyperlink.target == "http://t.test/1",
+      f"got {link_cell.hyperlink.target if link_cell.hyperlink else None!r}")
+check("자동필터가 전체 18열", ws.auto_filter.ref == "A2:R3",
+      f"got {ws.auto_filter.ref!r}")
 
 # 구버전 응답(부서 임베드가 departments 키)도 깨지지 않아야 한다
 legacy = [dict(rows[0], dept1=None, dept2=None, departments={"name": "홍보과"})]
 ws2 = openpyxl.load_workbook(io.BytesIO(notifier._build_excel(legacy))).active
 c2 = dict(zip([c.value for c in ws2[2]], [c.value for c in ws2[3]]))
 check("구버전 departments 키 폴백", c2.get("소관부서") == "홍보과", f"got {c2.get('소관부서')}")
+
+malicious = [dict(rows[0], title="=HYPERLINK(\"https://evil.test\")",
+                  content="  +CMD", url="@SUM(1,1)", false_reason="-1+1")]
+mw = openpyxl.load_workbook(io.BytesIO(notifier._build_excel(malicious)), data_only=False).active
+mh = [c.value for c in mw[2]]
+mcells = dict(zip(mh, mw[3]))
+for column, prefix in [("제목", "'="), ("원문", "'  +"), ("링크", "'@"), ("판단이유", "'-")]:
+    check(f"{column} 수식 삽입 방지",
+          mcells[column].data_type != "f" and mcells[column].value.startswith(prefix),
+          f"got {mcells[column].value!r} ({mcells[column].data_type})")
 
 print()
 if failures:

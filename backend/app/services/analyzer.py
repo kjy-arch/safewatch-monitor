@@ -10,6 +10,8 @@ from app.services.keyword_scorer import (
     score_text, is_enabled as prefilter_enabled, PREFILTER_THRESHOLD,
     has_military_context,
 )
+from app.services.pii_masking import mask_pii
+from app.services import exclusions
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
@@ -28,7 +30,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
     # (백로그는 수동 '미분류 분류'(POST /api/crawl/analyze)로 따로 소진한다.)
     query = (
         supabase.table("crawled_articles")
-        .select("id, title, content, source_type")
+        .select("id, title, content, url, source_type")
         .is_("false_score", "null")
         .order("created_at", desc=True)
     )
@@ -36,6 +38,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
         query = query.not_.in_("id", list(_failed_ids)[:_FAILED_IDS_MAX])
     articles = query.limit(limit).execute().data
     departments = supabase.table("departments").select("id, name, keywords").execute().data
+    exclusion_rules = exclusions.load_active_rules()
 
     # 키워드 점수 사전 필터: 고점수 우선 분류, 임계치 미만은 Gemini 없이 단순정보 처리
     if prefilter_enabled():
@@ -44,6 +47,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
 
     analyzed = 0
     prefiltered = 0
+    excluded = 0
     for idx, article in enumerate(articles, 1):
         if progress_cb:
             progress_cb(idx, len(articles))
@@ -52,6 +56,19 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                   flush=True)
         try:
             text = f"{article.get('title') or ''} {article['content']}"
+
+            rule = exclusions.match_rule(
+                exclusion_rules, article.get("url"), article.get("content")
+            )
+            if rule:
+                supabase.table("crawled_articles").update(
+                    exclusions.excluded_fields(rule)
+                ).eq("id", article["id"]).execute()
+                exclusions.record_match(rule["id"], "crawled_articles", article["id"])
+                excluded += 1
+                analyzed += 1
+                progress.count_analyzed()
+                continue
 
             # ① 병역 관련성 게이트 — 병역 단어가 하나도 없으면 Gemini에 보내지 않는다.
             #    글은 그대로 저장해 두므로(삭제 아님) 검수 화면에서 되돌릴 수 있고,
@@ -122,6 +139,8 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
 
     if prefiltered:
         print(f"[analyzer] 사전필터로 {prefiltered}건 자동분류 (Gemini 호출 생략)")
+    if excluded:
+        print(f"[analyzer] 담당자 제외 규칙으로 {excluded}건 자동 제외 (Gemini 호출 생략)")
     if analyzed < len(articles):
         print(f"[analyzer] {len(articles)}건 중 {len(articles) - analyzed}건 실패")
     return analyzed
@@ -141,14 +160,23 @@ def _find_depts(names, departments) -> list:
     return ids
 
 
-def _analyze(title: str, text: str, source_type: str, departments: list) -> dict:
+def _analyze(title: str, text: str, source_type: str, departments: list,
+             max_chars: int = 800) -> dict:
+    """한 건을 Gemini로 판정.
+
+    `max_chars`는 프롬프트에 실을 본문 길이 상한이다. 기본 800은 수집분이 검색 API 요약
+    (약 120자)이라 넉넉했던 값이고, 2단계 검증(services/verify.py)은 조회한 본문 전문을
+    넣어야 하므로 더 큰 값을 준다.
+    """
     source_label = {"언론": "언론 기사", "SNS": "SNS 게시물",
                     "커뮤니티": "커뮤니티 게시물", "유튜브": "유튜브 댓글",
                     "지식인": "지식인 질문글"}.get(source_type, "텍스트")
     dept_list = "\n".join(f"- {d['name']}" for d in departments)
 
-    system = f"{SYSTEM_PROMPT}\n\n[부서 목록]\n{dept_list}"
-    prompt = f"출처: {source_label}\n제목: {title[:150]}\n내용: {text[:800]}"
+    system = mask_pii(f"{SYSTEM_PROMPT}\n\n[부서 목록]\n{dept_list}")
+    prompt = mask_pii(
+        f"출처: {source_label}\n제목: {title[:150]}\n내용: {text[:max_chars]}"
+    )
 
     # Gemini 호출 — 실패 시 최대 3회 재시도
     for attempt in range(3):

@@ -8,7 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist는 커밋한다 — 루트 .gitignore의 예외 주석 참고 (Node 없는 PC 대응)
 dist-ssr
 *.local
 

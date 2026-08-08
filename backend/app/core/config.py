@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     AUTO_CRAWL: bool = False
     # 수집 완료 시 결과 엑셀을 저장할 폴더. 미설정이면 사용자 다운로드 폴더(~/Downloads).
     EXPORT_DIR: str = ""
-    CORS_ORIGINS: str = "*"  # 쉼표 구분 목록. 운영 배포 시 대시보드 도메인으로 제한
+    # 화면은 운영 시 백엔드와 같은 origin에서 제공된다. 아래 값은 Vite 개발 서버만 허용한다.
+    # LAN/서버 배포로 전환할 때는 인증을 먼저 추가하고 .env에 필요한 origin만 명시한다.
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     class Config:
         env_file = ".env"

@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 
 from app.core.config import settings
 from app.core.database import supabase
+from app.services.excel_safety import sanitize_workbook
 
 
 # ── 엑셀 생성 ─────────────────────────────────────────────
@@ -66,6 +67,10 @@ def _build_excel(articles: list) -> bytes:
         ws.column_dimensions[get_column_letter(col_idx)].width = col_width
     ws.row_dimensions[2].height = 22
 
+    link_col_idx = next(
+        idx for idx, (name, _) in enumerate(COLUMNS, start=1) if name == "링크"
+    )
+
     # 데이터
     for row_num, a in enumerate(articles, start=3):
         def _dname(key):
@@ -108,15 +113,19 @@ def _build_excel(articles: list) -> bytes:
                 cell.alignment = Alignment(horizontal="center", vertical="top")
             if col_idx == 4:
                 cell.alignment = Alignment(horizontal="center", vertical="top")
-            # ★ 링크 컬럼(11번째)에 하이퍼링크 적용
-            if col_idx == 11 and value:
-                cell.value     = "링크 바로가기"
+            # 열 추가·순서 변경에도 실제 "링크" 열을 찾아 적용한다.
+            if (col_idx == link_col_idx and isinstance(value, str)
+                    and value.lower().startswith(("http://", "https://"))):
+                # 실제 URL을 그대로 보여주면서 셀 자체를 클릭 가능한 링크로 만든다.
+                cell.value     = value
                 cell.hyperlink = value
                 cell.font      = Font(size=9, color="0563C1", underline="single")
 
     ws.freeze_panes = "A3"
-    ws.auto_filter.ref = f"A2:L{len(articles) + 2}"
+    last_col = get_column_letter(len(COLUMNS))
+    ws.auto_filter.ref = f"A2:{last_col}{len(articles) + 2}"
 
+    sanitize_workbook(wb)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -196,9 +205,30 @@ def _summary_html(articles: list, today_str: str) -> str:
 </body></html>"""
 
 
+def _is_alert_candidate(article: dict, min_score: int) -> bool:
+    """점수뿐 아니라 최종 조치유형과 2차 검증 결과까지 반영한다.
+
+    2차 확인이 끝난 글은 verify_action을 우선한다. 본문 조회에 실패한 글은 확인되지 않은
+    상태이므로 자동 알림에서 제외한다. 아직 2차 확인 전이거나 조회 대상이 아닌 글은 현재
+    조치유형을 사용한다.
+    """
+    if min_score > 0 and (article.get("false_score") or -1) < min_score:
+        return False
+
+    verify_status = article.get("verify_status")
+    if verify_status == "조회실패":
+        return False
+    action_type = (
+        article.get("verify_action")
+        if verify_status == "확인완료"
+        else article.get("action_type")
+    )
+    return action_type == "삭제대상"
+
+
 # ── 발송 메인 ─────────────────────────────────────────────
 def send_alerts():
-    """당일 수집 기사를 수신자별 min_score 기준으로 필터링해 엑셀 첨부 발송."""
+    """당일 삭제대상 기사를 점수·2차 검증 결과로 필터링해 엑셀 첨부 발송."""
     recipients = (
         supabase.table("alert_settings")
         .select("email, min_score")
@@ -238,9 +268,7 @@ def send_alerts():
     for r in recipients:
         ms = r.get("min_score") or 0
         if ms not in cache:
-            filtered = articles if ms <= 0 else [
-                a for a in articles if (a.get("false_score") or -1) >= ms
-            ]
+            filtered = [a for a in articles if _is_alert_candidate(a, ms)]
             cache[ms] = (
                 filtered,
                 _build_excel(filtered) if filtered else None,

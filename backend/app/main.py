@@ -22,6 +22,7 @@ from app.api.settings import router as settings_router
 from app.api.docs import router as docs_router
 from app.api.runs import router as runs_router      # 실행 이력·담당자 (Phase 3)
 from app.api.review import router as review_router  # 검수·재분류 (Phase 6)
+from app.api.verify import router as verify_router  # 2단계 검증 (2026-08-07)
 from app.core.config import settings
 from app.core.scheduler import start_scheduler, stop_scheduler
 
@@ -56,4 +57,5 @@ app.include_router(settings_router, prefix="/api")
 app.include_router(docs_router, prefix="/api")
 app.include_router(runs_router, prefix="/api")
 app.include_router(review_router, prefix="/api")
+app.include_router(verify_router, prefix="/api")
 app.include_router(dashboard_router)  # 대시보드는 루트(/)에 서빙

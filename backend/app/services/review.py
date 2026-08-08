@@ -123,12 +123,23 @@ def queue(action_type: str | None = None, response_status: str | None = None,
         cols = ("id, source_type, false_score, false_level, label_l2, subject, category, "
                 f"action_type, intent_type, content_type, response_status, response_memo, "
                 f"created_at, {TEXT_COL[table]}, {URL_COL[table]}")
-        q = supabase.table(table).select(cols).not_.is_("false_level", "null")
-        if action_type:
-            q = q.eq("action_type", action_type)
-        if response_status:
-            q = q.eq("response_status", response_status)
-        rows = q.order("false_score", desc=True).limit(limit).execute().data
+        # 2단계 검증 결과는 수집분에만 있다 (010)
+        verify_cols = (", verify_status, verify_action, verify_reason, verified_at"
+                       if table == "crawled_articles" else "")
+
+        def fetch(select_cols: str):
+            q = supabase.table(table).select(select_cols).not_.is_("false_level", "null")
+            if action_type:
+                q = q.eq("action_type", action_type)
+            if response_status:
+                q = q.eq("response_status", response_status)
+            return q.order("false_score", desc=True).limit(limit).execute().data
+
+        try:
+            rows = fetch(cols + verify_cols)
+        except Exception:
+            # 010 미적용 환경에서도 검수 화면은 떠야 한다 (002·006에서 쓰던 폴백과 같은 방식)
+            rows = fetch(cols)
         for r in rows:
             out.append({
                 "table":  table,

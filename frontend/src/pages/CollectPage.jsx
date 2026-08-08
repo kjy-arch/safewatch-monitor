@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import {
   getCrawlSources, runCrawl, getCrawlStatus, getBacklog, runAnalyzeBacklog,
   articlesExportUrl,
@@ -20,6 +20,14 @@ export default function CollectPage() {
   const [level, setLevel] = useState('')
   const timer = useRef(null)
 
+  const poll = useCallback(function pollStatus() {
+    getCrawlStatus().then(s => {
+      setStatus(s)
+      if (s.status === 'running') timer.current = setTimeout(pollStatus, 1500)
+      else getBacklog().then(b => setBacklog(b.unclassified)).catch(() => {})
+    }).catch(() => {})
+  }, [])
+
   useEffect(() => {
     getCrawlSources().then(list => {
       setSources(list)
@@ -28,15 +36,7 @@ export default function CollectPage() {
     }).catch(() => setMsg('수집 소스를 불러오지 못했습니다.'))
     poll()
     return () => clearTimeout(timer.current)
-  }, [])
-
-  function poll() {
-    getCrawlStatus().then(s => {
-      setStatus(s)
-      if (s.status === 'running') timer.current = setTimeout(poll, 1500)
-      else getBacklog().then(b => setBacklog(b.unclassified)).catch(() => {})
-    }).catch(() => {})
-  }
+  }, [poll])
 
   function toggle(id) {
     setPicked(prev => {

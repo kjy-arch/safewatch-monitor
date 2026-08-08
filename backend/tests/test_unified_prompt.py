@@ -71,6 +71,29 @@ check("하한이 상위 점수를 깎지 않음", r["false_score"] == 95, f"got 
 r = parse_unified({"label_l2": "단순내용", "false_score": "숫자아님", "category": "해당없음"})
 check("비정상 점수 → 구간 하한", r["false_score"] == 0, f"got {r['false_score']}")
 
+print("\n[모순 가드 — 풍자/비판인데 삭제대상 (2026-08-07)]")
+# 2026-08-07 실측: 정치 비판 댓글 27건이 삭제대상으로 판정됐고, 그중 6건은 Gemini가
+# intent_type="풍자/비판"이라 해놓고 category는 삭제대상 계열을 골랐다. 결정적 매핑이
+# 그대로 삭제대상을 확정해, 공공기관이 정치 비판을 삭제 요청 후보로 올리는 결과가 됐다.
+# 비대상으로 낮추지 않고 종합판단으로 강등한다 — 풍자 형식의 실제 조장 글이 있을 수 있다.
+for cat in ("편법·속임수·공정성 훼손", "허위·조작"):
+    r = parse_unified({"label_l2": "신뢰저하", "category": cat,
+                       "intent_type": "풍자/비판", "false_score": 60})
+    check(f"{cat}: 풍자/비판이면 종합판단", r["action_type"] == "종합판단",
+          f"got {r['action_type']}")
+    # 종합판단이면 삭제대상 하한(67)이 안 걸려 알림 임계(min_score 67) 아래에 머문다
+    check(f"{cat}: 점수 하한 미적용", r["false_score"] == 60, f"got {r['false_score']}")
+    check(f"{cat}: 알림 임계 미만", r["false_score"] < DELETE_SCORE_FLOOR)
+
+r = parse_unified({"label_l2": "방법안내", "category": "편법·속임수·공정성 훼손",
+                   "intent_type": "악의적 유포", "false_score": 85})
+check("풍자/비판이 아니면 삭제대상 유지", r["action_type"] == "삭제대상",
+      f"got {r['action_type']}")
+
+r = parse_unified({"label_l2": "신뢰저하", "category": "정책비판",
+                   "intent_type": "풍자/비판", "action_type": "비대상", "false_score": 60})
+check("정책비판/비대상은 그대로", r["action_type"] == "비대상", f"got {r['action_type']}")
+
 print("\n[부서 — 복수 매칭]")
 r = parse_unified({"label_l2": "단순내용", "department_names": ["가", "나", "다"]})
 check("최대 2개로 제한", r["department_names"] == ["가", "나"], f"got {r['department_names']}")

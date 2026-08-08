@@ -2,9 +2,14 @@ import pandas as pd
 import openpyxl
 from io import BytesIO
 from typing import List, Dict, Any
+from zipfile import BadZipFile, ZipFile
+from app.services.excel_safety import sanitize_workbook
 
 
 VALID_SOURCE_TYPES = {"언론", "SNS", "커뮤니티", "유튜브"}
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+MAX_DATA_ROWS = 1000
 
 # 컬럼명 자동 인식 매핑 (한글/영문 모두 지원)
 #
@@ -55,8 +60,31 @@ def _read_with_header_detection(file_bytes: bytes, max_scan: int = 5) -> pd.Data
     return pd.read_excel(BytesIO(file_bytes), dtype=str).fillna("")
 
 
-def parse_excel(file_bytes: bytes) -> List[Dict[str, Any]]:
-    df = _read_with_header_detection(file_bytes)
+def _validate_xlsx_container(file_bytes: bytes) -> None:
+    """이름만 .xlsx인 파일과 과도하게 압축된 파일을 파싱 전에 거부한다."""
+    try:
+        with ZipFile(BytesIO(file_bytes)) as archive:
+            names = set(archive.namelist())
+            if "[Content_Types].xml" not in names or "xl/workbook.xml" not in names:
+                raise ValueError("유효한 .xlsx 파일이 아닙니다.")
+            uncompressed_size = sum(info.file_size for info in archive.infolist())
+            if uncompressed_size > MAX_UNCOMPRESSED_BYTES:
+                raise ValueError("압축을 푼 엑셀 파일 크기는 50MB 이하여야 합니다.")
+    except BadZipFile as e:
+        raise ValueError("유효한 .xlsx 파일이 아닙니다.") from e
+
+
+def parse_excel(file_bytes: bytes, max_rows: int = MAX_DATA_ROWS) -> List[Dict[str, Any]]:
+    if not file_bytes:
+        raise ValueError("빈 파일은 업로드할 수 없습니다.")
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise ValueError("파일 크기는 10MB 이하여야 합니다.")
+    _validate_xlsx_container(file_bytes)
+
+    try:
+        df = _read_with_header_detection(file_bytes)
+    except Exception as e:
+        raise ValueError("유효한 .xlsx 파일이 아닙니다.") from e
     df = df.fillna("")
 
     cols = list(df.columns)
@@ -90,6 +118,8 @@ def parse_excel(file_bytes: bytes) -> List[Dict[str, Any]]:
             "source_type": source_type,
             "source_url": source_url,
         })
+        if len(rows) > max_rows:
+            raise ValueError(f"분석할 데이터는 최대 {max_rows:,}행까지 업로드할 수 있습니다.")
 
     return rows
 
@@ -123,6 +153,7 @@ def build_result_excel(original_rows: List[Dict], analysis_results: List[Dict]) 
         for col in ws.columns:
             max_len = max(len(str(cell.value or "")) for cell in col)
             ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+        sanitize_workbook(writer.book)
     return buf.getvalue()
 
 
@@ -192,4 +223,5 @@ def build_quarterly_excel(articles: List[Dict], dept_map: Dict, period: str) -> 
             _pivot(ddf, "부서", "조치유형").to_excel(writer, sheet_name="부서별_조치유형")
         for ws in writer.sheets.values():
             _autofit(ws)
+        sanitize_workbook(writer.book)
     return buf.getvalue()

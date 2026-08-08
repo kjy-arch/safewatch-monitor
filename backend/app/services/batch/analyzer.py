@@ -10,6 +10,8 @@ from app.services.batch.doc_service import find_relevant_docs
 # Phase 2 — 수집분/업로드분이 같은 프롬프트·파서를 쓰도록 통합
 from app.services.unified_prompt import SYSTEM_PROMPT, parse_unified
 from app.services.keyword_scorer import has_military_context
+from app.services.pii_masking import mask_pii
+from app.services import exclusions
 
 PARALLEL_WORKERS = 5           # 동시 Gemini API 호출 수 (10에서 축소 — Windows httpx 동시연결 폭주 시 WinError 10035 완화)
 SUPABASE_PAGE_SIZE = 1000      # Supabase 페이지당 조회 건수
@@ -87,7 +89,7 @@ def analyze_batch(batch_id: str):
     while True:
         page = _retry_db(
             lambda: supabase.table("articles")
-            .select("id, original_text, source_type")
+            .select("id, original_text, source_type, source_url")
             .eq("batch_id", batch_id)
             .neq("status", "done")
             .range(offset, offset + SUPABASE_PAGE_SIZE - 1)
@@ -100,13 +102,33 @@ def analyze_batch(batch_id: str):
 
     _retry_db(lambda: supabase.table("batches").update({"status": "analyzing"}).eq("id", batch_id).execute())
 
+    # 담당자 제외 규칙은 Gemini 호출보다 먼저 적용한다. 원문 행은 감사용으로 남긴다.
+    exclusion_rules = exclusions.load_active_rules()
+    remaining = []
+    excluded_count = 0
+    for article in articles:
+        rule = exclusions.match_rule(
+            exclusion_rules, article.get("source_url"), article.get("original_text")
+        )
+        if not rule:
+            remaining.append(article)
+            continue
+        fields = exclusions.excluded_fields(rule)
+        fields.update({"status": "done", "error_reason": None,
+                       "department_id": None, "department_id_2": None,
+                       "dept_method": None})
+        _retry_db(lambda a=article, f=fields: supabase.table("articles")
+                  .update(f).eq("id", a["id"]).execute())
+        exclusions.record_match(rule["id"], "articles", article["id"])
+        excluded_count += 1
+
     # 동일 (원문, 출처) 조합은 분석 결과가 같으므로 한 번만 호출하고 결과를 공유 (중복 과금 방지)
     groups: dict[tuple, list[str]] = {}
-    for a in articles:
+    for a in remaining:
         groups.setdefault((a["original_text"], a["source_type"]), []).append(a["id"])
 
-    analyzed = 0
-    completed = 0
+    analyzed = excluded_count
+    completed = excluded_count
 
     def process_group(item):
         (text, source_type), ids = item
@@ -243,6 +265,7 @@ def _analyze_single(text: str, source_type: str, departments: list,
         f"출처: {source_label}\n"
         f"텍스트: {text}"
     )
+    prompt = mask_pii(prompt)
 
     for attempt in range(AI_MAX_RETRY):
         try:

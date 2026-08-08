@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react'
-import { getReviewQueue, getEditableFields, reclassify, getItemHistory } from '../api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  getReviewQueue, getEditableFields, reclassify, getItemHistory,
+  getVerifyPending, runVerify, getVerifyStatus,
+  registerExclusion, getExclusions, deactivateExclusion,
+} from '../api'
 
 /* 검수/선정 (요구 Q3·Q1) — AI 판정을 담당자가 검토·재분류하고, 삭제 요청 대상을 선정한다.
    재분류하면 무엇을·왜·누가 바꿨는지 이력에 남는다. */
@@ -22,13 +26,29 @@ export default function ReviewPage() {
   const [filter, setFilter] = useState({ action_type: '삭제대상', response_status: '' })
   const [editing, setEditing] = useState(null)
   const [msg, setMsg] = useState('')
+  const [excluding, setExcluding] = useState(null)
+  const [exclusionVersion, setExclusionVersion] = useState(0)
+
+  const load = useCallback(() => {
+    getReviewQueue(filter).then(setRows).catch(() => setRows([]))
+  }, [filter])
 
   useEffect(() => { getEditableFields().then(setFields).catch(() => {}) }, [])
-  useEffect(() => { load() }, [filter])
+  useEffect(() => { load() }, [load])
 
-  function load() {
-    setRows(null)
-    getReviewQueue(filter).then(setRows).catch(() => setRows([]))
+  async function exclude(row, ruleType) {
+    const label = ruleType === 'url' ? '이 URL' : '이 내용과 동일한 글'
+    const reason = prompt(`${label}을 앞으로 제외할 사유를 입력하세요.`)
+    if (!reason?.trim()) return
+    if (!confirm(`${label}을 등록하면 이후 일치 건은 AI 분석 없이 비대상·무관 처리됩니다. 계속할까요?`)) return
+    const key = `${row.table}:${row.id}:${ruleType}`
+    setExcluding(key)
+    try {
+      await registerExclusion(row.table, row.id, ruleType, reason.trim())
+      setMsg(`${label} 제외 규칙을 등록했습니다.`)
+      setExclusionVersion(v => v + 1)
+      load()
+    } catch (e) { setMsg(`오류: ${e.message}`) } finally { setExcluding(null) }
   }
 
   return (
@@ -49,6 +69,9 @@ export default function ReviewPage() {
         </div>
         {msg && <p className="text-sm mt-3 text-blue-700">{msg}</p>}
       </section>
+
+      <VerifyPanel onDone={load} />
+      <ExclusionPanel version={exclusionVersion} />
 
       {rows === null && <p className="text-sm text-gray-400 px-1">불러오는 중…</p>}
       {rows && !rows.length && (
@@ -71,10 +94,22 @@ export default function ReviewPage() {
               className="text-blue-600 underline">링크</a>}
           </div>
           <p className="text-sm text-gray-800 whitespace-pre-wrap line-clamp-3">{r.text?.slice(0, 400)}</p>
+          <VerifyResult row={r} />
           <div className="mt-2 flex gap-2">
             <button onClick={() => setEditing(editing?.id === r.id ? null : r)}
               className="text-xs border rounded px-3 py-1.5 hover:bg-gray-50">
               {editing?.id === r.id ? '닫기' : '재분류 / 상태변경'}
+            </button>
+            <button onClick={() => exclude(r, 'url')} disabled={!r.url || excluding}
+              title={!r.url ? '등록할 URL이 없습니다.' : ''}
+              className="text-xs border border-amber-300 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-50 disabled:opacity-40">
+              {excluding === `${r.table}:${r.id}:url` ? '등록 중…' : '이 URL 제외'}
+            </button>
+            <button onClick={() => exclude(r, 'content_hash')}
+              disabled={(r.text || '').trim().length < 30 || excluding}
+              title={(r.text || '').trim().length < 30 ? '내용이 30자 미만이라 등록할 수 없습니다.' : ''}
+              className="text-xs border border-amber-300 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-50 disabled:opacity-40">
+              {excluding === `${r.table}:${r.id}:content_hash` ? '등록 중…' : '이 내용과 동일한 글 제외'}
             </button>
           </div>
           {editing?.id === r.id && (
@@ -87,6 +122,68 @@ export default function ReviewPage() {
   )
 }
 
+function ExclusionPanel({ version }) {
+  const [rules, setRules] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [error, setError] = useState('')
+
+  const load = useCallback(() => {
+    getExclusions().then(data => { setRules(data); setError('') })
+      .catch(e => { setRules([]); setError(e.message) })
+  }, [])
+  useEffect(() => { if (open) load() }, [open, load, version])
+
+  async function deactivate(rule) {
+    if (!confirm('이 제외 규칙을 해제할까요? 이미 처리된 글의 판정은 자동 복원되지 않습니다.')) return
+    try {
+      await deactivateExclusion(rule.id)
+      setMsg('제외 규칙을 해제했습니다.')
+      load()
+    } catch (e) { setMsg(`오류: ${e.message}`) }
+  }
+
+  return (
+    <section className="bg-white rounded-lg shadow p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-bold text-sm">제외 규칙 관리</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            URL 완전일치 또는 정규화한 내용 완전일치만 제외합니다. 유사 문장은 제외하지 않습니다.
+          </p>
+        </div>
+        <button onClick={() => setOpen(v => !v)}
+          className="text-xs border rounded px-3 py-1.5 hover:bg-gray-50">
+          {open ? '닫기' : '활성 규칙 보기'}
+        </button>
+      </div>
+      {msg && <p className="text-xs text-blue-700 mt-2">{msg}</p>}
+      {error && <p className="text-xs text-red-600 mt-2">오류: {error}</p>}
+      {open && (
+        <div className="mt-3 space-y-2">
+          {rules === null && <p className="text-xs text-gray-400">불러오는 중…</p>}
+          {rules?.length === 0 && <p className="text-xs text-gray-400">활성 제외 규칙이 없습니다.</p>}
+          {rules?.map(rule => (
+            <div key={rule.id} className="border rounded p-2 flex items-start gap-3 text-xs">
+              <Chip tone="bg-amber-100 text-amber-800">
+                {rule.rule_type === 'url' ? 'URL' : '동일 내용'}
+              </Chip>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-gray-700" title={rule.display_value}>{rule.display_value}</p>
+                <p className="text-gray-400 mt-0.5">
+                  {rule.reason} · {rule.operator_name || rule.os_account || '미상'}
+                </p>
+              </div>
+              <button onClick={() => deactivate(rule)}
+                className="text-red-600 hover:underline whitespace-nowrap">해제</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function EditForm({ row, fields, onDone }) {
   const [changes, setChanges] = useState({})
   const [reason, setReason] = useState('')
@@ -96,7 +193,7 @@ function EditForm({ row, fields, onDone }) {
 
   useEffect(() => {
     getItemHistory(row.table, row.id).then(setHist).catch(() => setHist([]))
-  }, [row.id])
+  }, [row.id, row.table])
 
   const EDITABLE = ['action_type', 'category', 'label_l2', 'subject',
                     'intent_type', 'content_type', 'false_level', 'response_status']
@@ -155,6 +252,97 @@ function EditForm({ row, fields, onDone }) {
             ))}
           </ul>
         </div>
+      )}
+    </div>
+  )
+}
+
+/* 2단계 검증 실행 패널 — 수집은 검색 API 요약(약 120자)만 저장하므로, 삭제 요청 후보로
+   올라온 건은 본문을 다시 보고 판정한다. 판정을 덮어쓰지 않고 나란히 보여준다. */
+function VerifyPanel({ onDone }) {
+  const [pending, setPending] = useState(null)
+  const [state, setState] = useState(null)
+  const timer = useRef(null)
+
+  useEffect(() => {
+    getVerifyPending().then(setPending).catch(() => setPending(null))
+    return () => clearInterval(timer.current)
+  }, [])
+
+  async function start() {
+    await runVerify()
+    timer.current = setInterval(async () => {
+      const s = await getVerifyStatus()
+      setState(s)
+      if (!s.running) {
+        clearInterval(timer.current)
+        getVerifyPending().then(setPending).catch(() => {})
+        onDone?.()
+      }
+    }, 2000)
+  }
+
+  if (!pending) return null
+  const running = state?.running
+
+  return (
+    <section className="bg-white rounded-lg shadow p-5">
+      <h3 className="font-bold text-sm mb-1">2단계 검증 — 본문으로 다시 확인</h3>
+      <p className="text-xs text-gray-500 mb-3">
+        수집 단계는 검색 API의 <b>요약(약 120자)</b>만 저장합니다. 삭제 요청 후보로 올라온
+        건은 원문을 가져와 다시 판정합니다. <b>기존 판정을 덮어쓰지 않고</b> 나란히
+        보여주며, 최종 판단은 담당자가 합니다.
+        <br />
+        <span className="text-amber-700">
+          ⚠ 1차에서 비대상으로 떨어진 글은 확인하지 않습니다 — 오탐만 줄고 누락은 그대로입니다.
+        </span>
+      </p>
+      <div className="flex items-center gap-3 text-sm">
+        <button onClick={start} disabled={running || !pending.fetchable}
+          className="border rounded px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-40">
+          {running ? '확인 중…' : `본문 확인 (${pending.fetchable}건)`}
+        </button>
+        <span className="text-xs text-gray-500">
+          미확인 {pending.total}건 · 조회 가능 {pending.fetchable}건
+          {pending.skip > 0 && ` · 조회 불가 ${pending.skip}건(카페 로그인 벽·유튜브는 이미 전문)`}
+        </span>
+      </div>
+      {state && (
+        <p className="text-xs mt-2 text-gray-600">
+          {state.done}/{state.total} · 유지 {state.confirmed} · 변경 {state.overturned} · 실패 {state.failed}
+          {state.message && ` — ${state.message}`}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/* 1차(요약) vs 2차(본문) — 갈린 건이 검수 우선순위다. */
+function VerifyResult({ row }) {
+  if (!row.verify_status) return null
+  if (row.verify_status !== '확인완료') {
+    return (
+      <p className="mt-2 text-xs text-gray-400">
+        2차 확인: {row.verify_status}{row.verify_reason ? ` — ${row.verify_reason}` : ''}
+      </p>
+    )
+  }
+  const changed = row.verify_action && row.verify_action !== row.action_type
+  return (
+    <div className={`mt-2 rounded p-2 text-xs ${changed ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="font-semibold">{changed ? '⚠ 본문 확인 결과 판정이 갈립니다' : '본문 확인 — 판정 유지'}</span>
+        <Chip tone="bg-gray-100 text-gray-600">1차 {row.action_type}</Chip>
+        <span>→</span>
+        <Chip tone={changed ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}>
+          2차 {row.verify_action}
+        </Chip>
+      </div>
+      {row.verify_reason && <p className="mt-1 text-gray-600">2차 사유: {row.verify_reason}</p>}
+      {changed && (
+        <p className="mt-1 text-amber-800">
+          최종 판단은 아래 「재분류」로 직접 바꿔야 반영됩니다. 2차 결과는 참고 정보입니다.
+        </p>
       )}
     </div>
   )
