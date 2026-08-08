@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getReviewQueue, getEditableFields, reclassify, getItemHistory,
   getVerifyPending, runVerify, getVerifyStatus,
+  registerExclusion, getExclusions, deactivateExclusion,
 } from '../api'
 
 /* 검수/선정 (요구 Q3·Q1) — AI 판정을 담당자가 검토·재분류하고, 삭제 요청 대상을 선정한다.
@@ -25,6 +26,8 @@ export default function ReviewPage() {
   const [filter, setFilter] = useState({ action_type: '삭제대상', response_status: '' })
   const [editing, setEditing] = useState(null)
   const [msg, setMsg] = useState('')
+  const [excluding, setExcluding] = useState(null)
+  const [exclusionVersion, setExclusionVersion] = useState(0)
 
   const load = useCallback(() => {
     getReviewQueue(filter).then(setRows).catch(() => setRows([]))
@@ -32,6 +35,21 @@ export default function ReviewPage() {
 
   useEffect(() => { getEditableFields().then(setFields).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
+
+  async function exclude(row, ruleType) {
+    const label = ruleType === 'url' ? '이 URL' : '이 내용과 동일한 글'
+    const reason = prompt(`${label}을 앞으로 제외할 사유를 입력하세요.`)
+    if (!reason?.trim()) return
+    if (!confirm(`${label}을 등록하면 이후 일치 건은 AI 분석 없이 비대상·무관 처리됩니다. 계속할까요?`)) return
+    const key = `${row.table}:${row.id}:${ruleType}`
+    setExcluding(key)
+    try {
+      await registerExclusion(row.table, row.id, ruleType, reason.trim())
+      setMsg(`${label} 제외 규칙을 등록했습니다.`)
+      setExclusionVersion(v => v + 1)
+      load()
+    } catch (e) { setMsg(`오류: ${e.message}`) } finally { setExcluding(null) }
+  }
 
   return (
     <div className="space-y-4">
@@ -53,6 +71,7 @@ export default function ReviewPage() {
       </section>
 
       <VerifyPanel onDone={load} />
+      <ExclusionPanel version={exclusionVersion} />
 
       {rows === null && <p className="text-sm text-gray-400 px-1">불러오는 중…</p>}
       {rows && !rows.length && (
@@ -81,6 +100,17 @@ export default function ReviewPage() {
               className="text-xs border rounded px-3 py-1.5 hover:bg-gray-50">
               {editing?.id === r.id ? '닫기' : '재분류 / 상태변경'}
             </button>
+            <button onClick={() => exclude(r, 'url')} disabled={!r.url || excluding}
+              title={!r.url ? '등록할 URL이 없습니다.' : ''}
+              className="text-xs border border-amber-300 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-50 disabled:opacity-40">
+              {excluding === `${r.table}:${r.id}:url` ? '등록 중…' : '이 URL 제외'}
+            </button>
+            <button onClick={() => exclude(r, 'content_hash')}
+              disabled={(r.text || '').trim().length < 30 || excluding}
+              title={(r.text || '').trim().length < 30 ? '내용이 30자 미만이라 등록할 수 없습니다.' : ''}
+              className="text-xs border border-amber-300 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-50 disabled:opacity-40">
+              {excluding === `${r.table}:${r.id}:content_hash` ? '등록 중…' : '이 내용과 동일한 글 제외'}
+            </button>
           </div>
           {editing?.id === r.id && (
             <EditForm row={r} fields={fields}
@@ -89,6 +119,68 @@ export default function ReviewPage() {
         </article>
       ))}
     </div>
+  )
+}
+
+function ExclusionPanel({ version }) {
+  const [rules, setRules] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [error, setError] = useState('')
+
+  const load = useCallback(() => {
+    getExclusions().then(data => { setRules(data); setError('') })
+      .catch(e => { setRules([]); setError(e.message) })
+  }, [])
+  useEffect(() => { if (open) load() }, [open, load, version])
+
+  async function deactivate(rule) {
+    if (!confirm('이 제외 규칙을 해제할까요? 이미 처리된 글의 판정은 자동 복원되지 않습니다.')) return
+    try {
+      await deactivateExclusion(rule.id)
+      setMsg('제외 규칙을 해제했습니다.')
+      load()
+    } catch (e) { setMsg(`오류: ${e.message}`) }
+  }
+
+  return (
+    <section className="bg-white rounded-lg shadow p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-bold text-sm">제외 규칙 관리</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            URL 완전일치 또는 정규화한 내용 완전일치만 제외합니다. 유사 문장은 제외하지 않습니다.
+          </p>
+        </div>
+        <button onClick={() => setOpen(v => !v)}
+          className="text-xs border rounded px-3 py-1.5 hover:bg-gray-50">
+          {open ? '닫기' : '활성 규칙 보기'}
+        </button>
+      </div>
+      {msg && <p className="text-xs text-blue-700 mt-2">{msg}</p>}
+      {error && <p className="text-xs text-red-600 mt-2">오류: {error}</p>}
+      {open && (
+        <div className="mt-3 space-y-2">
+          {rules === null && <p className="text-xs text-gray-400">불러오는 중…</p>}
+          {rules?.length === 0 && <p className="text-xs text-gray-400">활성 제외 규칙이 없습니다.</p>}
+          {rules?.map(rule => (
+            <div key={rule.id} className="border rounded p-2 flex items-start gap-3 text-xs">
+              <Chip tone="bg-amber-100 text-amber-800">
+                {rule.rule_type === 'url' ? 'URL' : '동일 내용'}
+              </Chip>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-gray-700" title={rule.display_value}>{rule.display_value}</p>
+                <p className="text-gray-400 mt-0.5">
+                  {rule.reason} · {rule.operator_name || rule.os_account || '미상'}
+                </p>
+              </div>
+              <button onClick={() => deactivate(rule)}
+                className="text-red-600 hover:underline whitespace-nowrap">해제</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

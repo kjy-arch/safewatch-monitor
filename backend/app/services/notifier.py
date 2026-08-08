@@ -67,6 +67,10 @@ def _build_excel(articles: list) -> bytes:
         ws.column_dimensions[get_column_letter(col_idx)].width = col_width
     ws.row_dimensions[2].height = 22
 
+    link_col_idx = next(
+        idx for idx, (name, _) in enumerate(COLUMNS, start=1) if name == "링크"
+    )
+
     # 데이터
     for row_num, a in enumerate(articles, start=3):
         def _dname(key):
@@ -109,14 +113,17 @@ def _build_excel(articles: list) -> bytes:
                 cell.alignment = Alignment(horizontal="center", vertical="top")
             if col_idx == 4:
                 cell.alignment = Alignment(horizontal="center", vertical="top")
-            # ★ 링크 컬럼(11번째)에 하이퍼링크 적용
-            if col_idx == 11 and value:
-                cell.value     = "링크 바로가기"
+            # 열 추가·순서 변경에도 실제 "링크" 열을 찾아 적용한다.
+            if (col_idx == link_col_idx and isinstance(value, str)
+                    and value.lower().startswith(("http://", "https://"))):
+                # 실제 URL을 그대로 보여주면서 셀 자체를 클릭 가능한 링크로 만든다.
+                cell.value     = value
                 cell.hyperlink = value
                 cell.font      = Font(size=9, color="0563C1", underline="single")
 
     ws.freeze_panes = "A3"
-    ws.auto_filter.ref = f"A2:L{len(articles) + 2}"
+    last_col = get_column_letter(len(COLUMNS))
+    ws.auto_filter.ref = f"A2:{last_col}{len(articles) + 2}"
 
     sanitize_workbook(wb)
     buf = BytesIO()

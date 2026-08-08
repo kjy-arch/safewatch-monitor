@@ -194,6 +194,15 @@ check("1순위 부서", cell.get("소관부서") == "병역조사과", f"got {ce
 check("2순위 부서(요구 Q4)", cell.get("소관부서2") == "병역판정검사과", f"got {cell.get('소관부서2')}")
 check("제목 채워짐(요구 R2)", cell.get("제목") == "5급 받는 법", f"got {cell.get('제목')}")
 check("조치유형 채워짐", cell.get("조치유형") == "삭제대상", f"got {cell.get('조치유형')}")
+check("내용유형 값 보존", cell.get("내용유형") == "과장/왜곡",
+      f"got {cell.get('내용유형')}")
+link_cell = ws.cell(row=3, column=hdr.index("링크") + 1)
+check("링크 열에 URL 표시", link_cell.value == "http://t.test/1", f"got {link_cell.value!r}")
+check("링크 열 실제 URL", link_cell.hyperlink is not None
+      and link_cell.hyperlink.target == "http://t.test/1",
+      f"got {link_cell.hyperlink.target if link_cell.hyperlink else None!r}")
+check("자동필터가 전체 18열", ws.auto_filter.ref == "A2:R3",
+      f"got {ws.auto_filter.ref!r}")
 
 # 구버전 응답(부서 임베드가 departments 키)도 깨지지 않아야 한다
 legacy = [dict(rows[0], dept1=None, dept2=None, departments={"name": "홍보과"})]

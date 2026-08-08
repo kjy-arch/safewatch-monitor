@@ -36,6 +36,13 @@ MONITOR = {
 }
 # 실행 이력·담당자 (Phase 3)
 RUNS = {"/api/operator", "/api/runs", "/api/runs/active"}
+# 검수·제외 규칙 — 같은 경로의 GET/POST가 모두 필요하다
+REVIEW = {
+    ("GET", "/api/review/queue"),
+    ("GET", "/api/review/exclusions"),
+    ("POST", "/api/review/exclusions"),
+    ("DELETE", "/api/review/exclusions/{rule_id}"),
+}
 # Phase 3-2에서 폐기 — 메모리 방식 엑셀 분류(결과가 서버 종료 시 소멸)
 RETIRED = {"/api/classify/excel", "/api/classify/result", "/api/classify/export"}
 # 분류자 계열 — 배치 업로드·부서·보고서·설정
@@ -58,6 +65,10 @@ for p in sorted(CLASSIFIER):
 print("\n[실행 이력]")
 for p in sorted(RUNS):
     check(p, p in paths)
+
+print("\n[검수·제외 규칙]")
+for method, path in sorted(REVIEW):
+    check(f"{method} {path}", (method, path) in routes)
 
 print("\n[폐기된 메모리 방식 엑셀 분류]")
 for p in sorted(RETIRED):

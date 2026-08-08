@@ -11,6 +11,7 @@ from app.services.keyword_scorer import (
     has_military_context,
 )
 from app.services.pii_masking import mask_pii
+from app.services import exclusions
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
@@ -29,7 +30,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
     # (백로그는 수동 '미분류 분류'(POST /api/crawl/analyze)로 따로 소진한다.)
     query = (
         supabase.table("crawled_articles")
-        .select("id, title, content, source_type")
+        .select("id, title, content, url, source_type")
         .is_("false_score", "null")
         .order("created_at", desc=True)
     )
@@ -37,6 +38,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
         query = query.not_.in_("id", list(_failed_ids)[:_FAILED_IDS_MAX])
     articles = query.limit(limit).execute().data
     departments = supabase.table("departments").select("id, name, keywords").execute().data
+    exclusion_rules = exclusions.load_active_rules()
 
     # 키워드 점수 사전 필터: 고점수 우선 분류, 임계치 미만은 Gemini 없이 단순정보 처리
     if prefilter_enabled():
@@ -45,6 +47,7 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
 
     analyzed = 0
     prefiltered = 0
+    excluded = 0
     for idx, article in enumerate(articles, 1):
         if progress_cb:
             progress_cb(idx, len(articles))
@@ -53,6 +56,19 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
                   flush=True)
         try:
             text = f"{article.get('title') or ''} {article['content']}"
+
+            rule = exclusions.match_rule(
+                exclusion_rules, article.get("url"), article.get("content")
+            )
+            if rule:
+                supabase.table("crawled_articles").update(
+                    exclusions.excluded_fields(rule)
+                ).eq("id", article["id"]).execute()
+                exclusions.record_match(rule["id"], "crawled_articles", article["id"])
+                excluded += 1
+                analyzed += 1
+                progress.count_analyzed()
+                continue
 
             # ① 병역 관련성 게이트 — 병역 단어가 하나도 없으면 Gemini에 보내지 않는다.
             #    글은 그대로 저장해 두므로(삭제 아님) 검수 화면에서 되돌릴 수 있고,
@@ -123,6 +139,8 @@ def analyze_unclassified(limit: int = 20, progress_cb=None) -> int:
 
     if prefiltered:
         print(f"[analyzer] 사전필터로 {prefiltered}건 자동분류 (Gemini 호출 생략)")
+    if excluded:
+        print(f"[analyzer] 담당자 제외 규칙으로 {excluded}건 자동 제외 (Gemini 호출 생략)")
     if analyzed < len(articles):
         print(f"[analyzer] {len(articles)}건 중 {len(articles) - analyzed}건 실패")
     return analyzed
